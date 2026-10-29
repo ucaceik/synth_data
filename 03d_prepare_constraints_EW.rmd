@@ -1,0 +1,1146 @@
+    ### Meta ###
+
+    # Author: Andreas Hoehn
+    # Version: 0.9
+    # Date:  2026-04-22
+    # About: Prepare Constraints From Small-Area Census Data 
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+    wd <- setwd("C:/Users/Jamie/Documents/compass")
+
+```{r census constraints, echo = FALSE} 
+### Run all ###
+  # Quick fix for my different use of constraints files: 
+    l_definitions$prepare_constraints <- TRUE
+    if (l_definitions$prepare_constraints == TRUE) {
+  # Set up each constraint
+
+  ### C01: Urban/Rural & Household Master Constraint ### 
+      
+    # load urban rural dataset 
+    dt_EW_hh_urban_rural <- data.table::fread("Input/Census_EW/Rural_Urban_Classification_(2021)_of_LSOAs_in_EW.csv")
+    dt_EW_hh_urban_rural <- copy(dt_EW_hh_urban_rural[, .(LSOA21CD, urban_rural = Urban_rural_flag)])
+    setkey(dt_EW_hh_urban_rural, LSOA21CD)
+      
+    # establish total number of households 
+    dt_EW_master_number_hh <- data.table::fread("Input/Census_EW/dt_number_households.csv")
+    dt_EW_master_number_hh <- copy(dt_EW_master_number_hh[, .(LSOA21CD = geography_code,
+                                                              N_hh = obs_value)])
+
+    # bring together
+    dt_EW_hh_urban_rural <- merge(dt_EW_hh_urban_rural, dt_EW_master_number_hh, by = "LSOA21CD",
+                              all.x = TRUE, all.y = TRUE)
+
+    # recode urban - rural
+    dt_EW_hh_urban_rural[, `:=`(urban = NA_integer_, rural = NA_integer_)]
+    dt_EW_hh_urban_rural[urban_rural == "Urban", `:=`(urban = N_hh, rural = 0)]
+    dt_EW_hh_urban_rural[urban_rural == "Rural", `:=`(rural = N_hh, urban = 0)]
+    dt_EW_hh_urban_rural <- dt_EW_hh_urban_rural[, .(areacode = LSOA21CD, urban, rural)]
+    setkey(dt_EW_hh_urban_rural, areacode)
+
+    # deep copy to obtain master number of HH for proportional adjustments 
+    dt_EW_master_number_hh <- copy(dt_EW_hh_urban_rural[, .(LSOA21CD = areacode, 
+                                                      row_sum_master = urban + rural)])
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c02: HH Heating ###
+    dt_EW_hh_heating <- data.table::fread("Input/Census_EW/census_2021_c02_hh_heating.csv", # 1 = NO / 2 = YES Central Heating
+                                        header = TRUE, skip = 0)
+    dt_EW_hh_heating <- janitor::clean_names(dt_EW_hh_heating)
+    dt_EW_hh_heating <- .BasicClean(dt_EW_hh_heating)
+    dt_EW_hh_heating <- copy(dt_EW_hh_heating[type_of_central_heating_in_household_3_categories_code != -9L,
+                                            .(LSOA21CD = lower_layer_super_output_areas_code,
+                                              hh_heating = type_of_central_heating_in_household_3_categories_code,
+                                              N_hh = observation)])
+
+    # recoding; 
+    dt_EW_hh_heating[, hh_heating := as.character(hh_heating)]
+    dt_EW_hh_heating[hh_heating == "1", hh_heating := "without_heating"]
+    dt_EW_hh_heating[hh_heating == "2", hh_heating := "with_heating"]
+    dt_EW_hh_heating <- data.table::dcast(dt_EW_hh_heating, LSOA21CD ~ hh_heating)
+
+    # reducing; not required
+    dt_EW_hh_heating <- copy(dt_EW_hh_heating)
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_hh_heating_dim <- dim(dt_EW_hh_heating)[[2]]
+    dt_EW_hh_heating[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_heating_dim]
+    dt_EW_hh_heating <- merge(x = dt_EW_hh_heating, y = dt_EW_master_number_hh, by = "LSOA21CD")
+    dt_EW_hh_heating <- .PropAdjustZero(dt_in = dt_EW_hh_heating,
+                                      total_in = "row_sum_master",
+                                      definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_hh_heating[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_heating_dim]
+    dt_EW_hh_heating_diag <- .PropDiag(dt_in = dt_EW_hh_heating)
+    # data.table::fwrite(dt_EW_hh_heating_diag, "Output/Constraints/diag_c02_dt_EW_hh_heating.csv")
+
+    # reduce, key and safe constraints table
+    dt_EW_hh_heating <- copy(dt_EW_hh_heating[,1:dt_EW_hh_heating_dim])
+    data.table::setnames(dt_EW_hh_heating, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_hh_heating, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c03: HH Type ###
+    dt_EW_hh_type <- data.table::fread("Input/Census_EW/census_2021_c03_hh_type.csv",
+                                      header = TRUE, skip = 0)
+    dt_EW_hh_type <- janitor::clean_names(dt_EW_hh_type)
+    dt_EW_hh_type <- copy(dt_EW_hh_type[household_type_12_categories_code != -8L,
+                                      .(LSOA21CD = lower_layer_super_output_areas_code,
+                                        hh_type  = household_type_12_categories,
+                                        N_hh = observation)])
+
+    # recoding and reducing
+    dt_EW_hh_type <- data.table::dcast(dt_EW_hh_type, LSOA21CD ~ hh_type)
+    dt_EW_hh_type <- janitor::clean_names(dt_EW_hh_type)
+    dt_EW_hh_type <- .BasicClean(dt_EW_hh_type)
+
+    # one_person_household
+    dt_EW_hh_type[, one_person_household := one_person_household]
+
+    # lone_parent_children
+    dt_EW_hh_type[, lone_parent := 
+                  lone_parent_household_dependent_children + 
+                  lone_parent_household_no_dependent_children]
+
+    # couple_married_civil_no_children
+    dt_EW_hh_type[, couple_married_civil_no_children := 
+                  civil_partnership_couple_household_no_dependent_children + 
+                  married_couple_household_no_dependent_children + 
+                  cohabiting_couple_household_no_dependent_children]
+
+    # couple_married_civil_with_children
+    dt_EW_hh_type[, couple_married_civil_with_children :=
+                  civil_partnership_couple_household_dependent_children + 
+                  cohabiting_couple_household_dependent_children + 
+                  married_couple_household_dependent_children]
+
+    # other
+    dt_EW_hh_type[, other := multi_person_household_all_students + 
+                  multi_person_household_other]
+
+    # reduce 
+    dt_EW_hh_type <- copy(dt_EW_hh_type[, .(LSOA21CD = lsoa21cd,
+                                          one_person_household,
+                                          lone_parent,
+                                          couple_married_civil_no_children,
+                                          couple_married_civil_with_children,
+                                          other)])
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_hh_type_dim <- dim(dt_EW_hh_type)[[2]]
+    dt_EW_hh_type[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_type_dim]
+    dt_EW_hh_type <- merge(x = dt_EW_hh_type, y = dt_EW_master_number_hh, by = "LSOA21CD")
+    dt_EW_hh_type <- .PropAdjustZero(dt_in = dt_EW_hh_type,
+                                    total_in = "row_sum_master",
+                                    definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_hh_type[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_type_dim]
+    dt_EW_hh_type_diag <- .PropDiag(dt_in = dt_EW_hh_type)
+    #data.table::fwrite(dt_EW_hh_type_diag, "Output/Constraints/diag_c03_dt_EW_hh_type.csv")
+
+    # reduce, key and safe constraints table
+    dt_EW_hh_type <- copy(dt_EW_hh_type[,1:dt_EW_hh_type_dim])
+    data.table::setnames(dt_EW_hh_type, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_hh_type, areacode)
+    # save in next step
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c04: HH Tenure X Children ### 
+    # # load file
+    # dt_EW_hh_tenure_presence_child <- data.table::fread("Input/Census_EW/census_2021_c04_hh_tenure_child.csv",
+    #                                           header = TRUE, skip = 0)
+    # dt_EW_hh_tenure_presence_child <- janitor::clean_names(dt_EW_hh_tenure_presence_child)
+    # dt_EW_hh_tenure_presence_child <- copy(dt_EW_hh_tenure_presence_child[,
+    #                                                   .(LSOA21CD = lower_layer_super_output_areas_code,
+    #                                                     tenure = tenure_of_household_5_categories,
+    #                                                     child  = dependent_children_in_household_and_their_age_indicator_3_categories,
+    #                                                     N_hh = observation)])
+
+    # # recoding; 
+    # dt_EW_hh_tenure_presence_child <- data.table::dcast(dt_EW_hh_tenure_presence_child, LSOA21CD ~ tenure + child)
+    # dt_EW_hh_tenure_presence_child <- janitor::clean_names(dt_EW_hh_tenure_presence_child)
+    # dt_EW_hh_tenure_presence_child <- .BasicClean(dt_EW_hh_tenure_presence_child)
+
+    # # recode - owned outright
+    # dt_EW_hh_tenure_presence_child[, owned_outright_no_children   := owned_owns_outright_no_dependent_children_in_household]
+    # dt_EW_hh_tenure_presence_child[, owned_outright_with_children := owned_owns_outright_household_with_dependent_children]
+
+    # # recode - owned mortgage
+    # dt_EW_hh_tenure_presence_child[, owned_mortgage_no_children   := owned_owns_with_a_mortgage_or_loan_or_shared_ownership_no_dependent_children_in_household]
+    # dt_EW_hh_tenure_presence_child[, owned_mortgage_with_children := owned_owns_with_a_mortgage_or_loan_or_shared_ownership_household_with_dependent_children]
+
+    # # recode - private rented 
+    # dt_EW_hh_tenure_presence_child[, private_rented_no_children := private_rented_or_lives_rent_free_no_dependent_children_in_household]
+    # dt_EW_hh_tenure_presence_child[, private_rented_with_children  := private_rented_or_lives_rent_free_household_with_dependent_children]
+
+    # # recode - social rented 
+    # dt_EW_hh_tenure_presence_child[, social_rented_no_children := rented_social_rented_no_dependent_children_in_household]
+    # dt_EW_hh_tenure_presence_child[, social_rented_with_children := rented_social_rented_household_with_dependent_children]
+
+    # # reducing; 
+    # dt_EW_hh_tenure_presence_child <- copy(dt_EW_hh_tenure_presence_child[, .(LSOA21CD = lsoa21cd,
+    #                                                       owned_outright_no_children, owned_outright_with_children, 
+    #                                                       owned_mortgage_no_children, owned_mortgage_with_children,
+    #                                                       private_rented_no_children, private_rented_with_children,
+    #                                                       social_rented_no_children, social_rented_with_children)])
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_tenure_presence_child_dim <- dim(dt_EW_hh_tenure_presence_child)[[2]]
+    # dt_EW_hh_tenure_presence_child[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_tenure_presence_child_dim]
+    # dt_EW_hh_tenure_presence_child <- merge(x = dt_EW_hh_tenure_presence_child, y = dt_EW_master_number_hh, by = "LSOA21CD")
+    # dt_EW_hh_tenure_presence_child <- .PropAdjustZero(dt_in = dt_EW_hh_tenure_presence_child,
+    #                                         total_in = "row_sum_master",
+    #                                         definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_tenure_presence_child[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_tenure_presence_child_dim]
+    # dt_EW_hh_tenure_presence_child_diag <- .PropDiag(dt_in = dt_EW_hh_tenure_presence_child)
+    # #data.table::fwrite(dt_EW_hh_tenure_presence_child_diag, "Output/Constraints/diag_c04_dt_EW_hh_tenure_presence_child.csv")
+
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_tenure_presence_child <- copy(dt_EW_hh_tenure_presence_child[,1:dt_EW_hh_tenure_presence_child_dim])
+    # data.table::setnames(dt_EW_hh_tenure_presence_child, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_tenure_presence_child, areacode)
+    # # save in next step
+
+    # # ---------------------------------------------------------------------------- #
+    # # ---------------------------------------------------------------------------- #
+
+  ### c05: Number of Cars X HH Size###
+    # dt_EW_hh_cars_hh_size <- data.table::fread("Input/Census_EW/census_2021_c05_hh_cars_size.csv",
+    #                                       header = TRUE, skip = 0)
+    # dt_EW_hh_cars_hh_size <- janitor::clean_names(dt_EW_hh_cars_hh_size)
+    # dt_EW_hh_cars_hh_size <- copy(dt_EW_hh_cars_hh_size[car_or_van_availability_4_categories_code != -8L &
+    #                                               household_size_5_categories_code          !=  0,
+    #                                             .(LSOA21CD = lower_layer_super_output_areas_code,
+    #                                               cars  = car_or_van_availability_4_categories,
+    #                                               hhsize = household_size_5_categories,
+    #                                               N_hh = observation)])
+    # # recoding and reducing
+    # dt_EW_hh_cars_hh_size <- data.table::dcast(dt_EW_hh_cars_hh_size, LSOA21CD ~ cars + hhsize)
+    # dt_EW_hh_cars_hh_size <- janitor::clean_names(dt_EW_hh_cars_hh_size)
+    # dt_EW_hh_cars_hh_size <- .BasicClean(dt_EW_hh_cars_hh_size)
+
+
+    # dt_EW_hh_cars_hh_size[, hh_cars_00_hh_size_01 := no_cars_or_vans_in_household_1_person_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_00_hh_size_02 := no_cars_or_vans_in_household_2_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_00_hh_size_03 := no_cars_or_vans_in_household_3_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_00_hh_size_04p := no_cars_or_vans_in_household_4_or_more_people_in_household]
+
+    # dt_EW_hh_cars_hh_size[, hh_cars_01_hh_size_01 := x1_car_or_van_in_household_1_person_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_01_hh_size_02 := x1_car_or_van_in_household_2_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_01_hh_size_03 := x1_car_or_van_in_household_3_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_01_hh_size_04p := x1_car_or_van_in_household_4_or_more_people_in_household]
+
+    # dt_EW_hh_cars_hh_size[, hh_cars_02p_hh_size_01 := x2_or_more_cars_or_vans_in_household_1_person_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_02p_hh_size_02 := x2_or_more_cars_or_vans_in_household_2_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_02p_hh_size_03 := x2_or_more_cars_or_vans_in_household_3_people_in_household]
+    # dt_EW_hh_cars_hh_size[, hh_cars_02p_hh_size_04p := x2_or_more_cars_or_vans_in_household_4_or_more_people_in_household]
+
+    # dt_EW_hh_cars_hh_size <- copy(dt_EW_hh_cars_hh_size[,
+    #                                             .(LSOA21CD = lsoa21cd,
+    #                                               hh_cars_00_hh_size_01, hh_cars_00_hh_size_02, hh_cars_00_hh_size_03, hh_cars_00_hh_size_04p,
+    #                                               hh_cars_01_hh_size_01, hh_cars_01_hh_size_02, hh_cars_01_hh_size_03, hh_cars_01_hh_size_04p,
+    #                                               hh_cars_02p_hh_size_01, hh_cars_02p_hh_size_02, hh_cars_02p_hh_size_03, hh_cars_02p_hh_size_04p)])
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_cars_hh_size_dim <- dim(dt_EW_hh_cars_hh_size)[[2]]
+    # dt_EW_hh_cars_hh_size[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_cars_hh_size_dim]
+    # dt_EW_hh_cars_hh_size <- merge(x = dt_EW_hh_cars_hh_size, y = dt_EW_master_number_hh, by = "LSOA21CD")
+    # dt_EW_hh_cars_hh_size <- .PropAdjustZero(dt_in = dt_EW_hh_cars_hh_size,
+    #                                     total_in = "row_sum_master",
+    #                                     definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_cars_hh_size[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_cars_hh_size_dim]
+    # dt_EW_hh_cars_hh_size_diag <- .PropDiag(dt_in = dt_EW_hh_cars_hh_size)
+    # #data.table::fwrite(dt_EW_hh_cars_hh_size_diag, "Output/Constraints/diag_c05_dt_EW_hh_cars_hh_size.csv")
+
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_cars_hh_size <- copy(dt_EW_hh_cars_hh_size[,1:dt_EW_hh_cars_hh_size_dim])
+    # data.table::setnames(dt_EW_hh_cars_hh_size, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_cars_hh_size, areacode)
+    # # save in next step
+
+    # # ---------------------------------------------------------------------------- #
+    # # ---------------------------------------------------------------------------- #
+
+  ### c06: HH Beds X HH Size ###
+    # dt_EW_hh_beds_hh_size <- data.table::fread("Input/Census_EW/census_2021_c06_hh_beds_size.csv",
+    #                                       header = TRUE, skip = 0)
+    # dt_EW_hh_beds_hh_size <- janitor::clean_names(dt_EW_hh_beds_hh_size)
+    # dt_EW_hh_beds_hh_size <- copy(dt_EW_hh_beds_hh_size[
+    #   number_of_bedrooms_5_categories_code != -9L & household_size_5_categories_code !=  0L,
+    #   .(LSOA21CD = lower_layer_super_output_areas_code,
+    #     beds = number_of_bedrooms_5_categories_code,
+    #     size = household_size_5_categories_code,
+    #     N_hh = observation)])
+
+    # # recoding and reducing
+    # dt_EW_hh_beds_hh_size[, beds := paste0("hh_beds_0", beds)]
+    # dt_EW_hh_beds_hh_size[, size := paste0("hh_size_0", size)]
+    # dt_EW_hh_beds_hh_size[beds == "hh_beds_04", beds := "hh_beds_04p"]
+    # dt_EW_hh_beds_hh_size[size == "hh_size_04", size := "hh_size_04p"]
+
+    # dt_EW_hh_beds_hh_size <- data.table::dcast(dt_EW_hh_beds_hh_size, LSOA21CD ~ beds + size)
+    # dt_EW_hh_beds_hh_size <- .BasicClean(dt_EW_hh_beds_hh_size)
+
+    # # reducing; not required
+    # dt_EW_hh_beds_hh_size <- copy(dt_EW_hh_beds_hh_size)
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_beds_hh_size_dim <- dim(dt_EW_hh_beds_hh_size)[[2]]
+    # dt_EW_hh_beds_hh_size[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_beds_hh_size_dim]
+    # dt_EW_hh_beds_hh_size <- merge(x = dt_EW_hh_beds_hh_size, y = dt_EW_master_number_hh, by = "LSOA21CD")
+    # dt_EW_hh_beds_hh_size <- .PropAdjustZero(dt_in = dt_EW_hh_beds_hh_size,
+    #                                     total_in = "row_sum_master",
+    #                                     definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_beds_hh_size[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_beds_hh_size_dim]
+    # dt_EW_hh_beds_hh_size_diag <- .PropDiag(dt_in = dt_EW_hh_beds_hh_size)
+    # #data.table::fwrite(dt_EW_hh_beds_hh_size_diag, "Output/Constraints/diag_c06_dt_EW_hh_beds_hh_size.csv")
+
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_beds_hh_size <- copy(dt_EW_hh_beds_hh_size[,1:dt_EW_hh_beds_hh_size_dim])
+    # data.table::setnames(dt_EW_hh_beds_hh_size, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_beds_hh_size, areacode)
+    # # save in next step
+
+    # # ---------------------------------------------------------------------------- #
+    # # ---------------------------------------------------------------------------- #
+
+  ### c07: HH Number of Adults in Employment by Household Size ### 
+    # dt_EW_hh_employment_hh_size <- data.table::fread("Input/Census_EW/census_2021_c07_hh_employment_size.csv",
+    #                                             header = TRUE, skip = 0)
+    # dt_EW_hh_employment_hh_size <- janitor::clean_names(dt_EW_hh_employment_hh_size)
+    # dt_EW_hh_employment_hh_size <- copy(dt_EW_hh_employment_hh_size[
+    #   household_size_5_categories_code != 0L & 
+    #     number_of_adults_in_employment_in_household_5_categories_code != -8L,
+    #   .(LSOA21CD    = lower_layer_super_output_areas_code,
+    #     hh_employed = number_of_adults_in_employment_in_household_5_categories_code, 
+    #     hh_size     = household_size_5_categories_code,
+    #     N_hh        = observation)])
+
+    # # recoding; 
+    # dt_EW_hh_employment_hh_size[, hh_size := paste0("hh_size_0", hh_size)]
+    # dt_EW_hh_employment_hh_size[, hh_employed := paste0("hh_employed_0",hh_employed)]
+    # dt_EW_hh_employment_hh_size[, employed_hh_size := paste0(hh_employed,"_",hh_size)]
+    # dt_EW_hh_employment_hh_size <- copy(dt_EW_hh_employment_hh_size[,
+    #                                                           .(LSOA21CD, employed_hh_size, N_hh)])
+    # dt_EW_hh_employment_hh_size <- data.table::dcast(dt_EW_hh_employment_hh_size,
+    #                                             LSOA21CD ~ employed_hh_size)
+    # dt_EW_hh_employment_hh_size <- .BasicClean(dt_EW_hh_employment_hh_size)
+
+    # dt_EW_hh_employment_hh_size <- copy(dt_EW_hh_employment_hh_size[, 
+    #                     .(LSOA21CD,
+    #                       hh_employed_00_hh_size_01,
+    #                       hh_employed_01_hh_size_01,
+    #                       hh_employed_00_hh_size_02,
+    #                       hh_employed_01_hh_size_02,
+    #                       hh_employed_02_hh_size_02 = hh_employed_02_hh_size_01 + hh_employed_02_hh_size_02,
+    #                       hh_employed_00_hh_size_03,
+    #                       hh_employed_01_hh_size_03,
+    #                       hh_employed_02_hh_size_03,
+    #                       hh_employed_03p_hh_size_03  = hh_employed_03_hh_size_01 + hh_employed_03_hh_size_02 + hh_employed_03_hh_size_03,
+    #                       hh_employed_00_hh_size_04p  = hh_employed_00_hh_size_04,
+    #                       hh_employed_01_hh_size_04p  = hh_employed_01_hh_size_04,
+    #                       hh_employed_02_hh_size_04p  = hh_employed_02_hh_size_04,
+    #                       hh_employed_03p_hh_size_04p = hh_employed_03_hh_size_04)])
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_employment_hh_size_dim <- dim(dt_EW_hh_employment_hh_size)[[2]]
+    # dt_EW_hh_employment_hh_size[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_employment_hh_size_dim]
+    # dt_EW_hh_employment_hh_size <- merge(x = dt_EW_hh_employment_hh_size,
+    #                                 y = dt_EW_master_number_hh,
+    #                                 by = "LSOA21CD")
+    # dt_EW_hh_employment_hh_size <- .PropAdjustZero(dt_in = dt_EW_hh_employment_hh_size,
+    #                                           total_in = "row_sum_master",
+    #                                           definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_employment_hh_size[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_employment_hh_size_dim]
+    # dt_EW_hh_employment_hh_size_diag <- .PropDiag(dt_in = dt_EW_hh_employment_hh_size)
+    # #data.table::fwrite(dt_EW_hh_employment_hh_size_diag, "Output/Constraints/diag_c07_dt_EW_hh_employment_hh_size.csv")
+
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_employment_hh_size <- copy(dt_EW_hh_employment_hh_size[,1:dt_EW_hh_employment_hh_size_dim])
+    # data.table::setnames(dt_EW_hh_employment_hh_size, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_employment_hh_size, areacode)
+    # # save in next step
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+      
+  ### c08: HH Number of Unpaid Carers by HH Size ### 
+    # dt_EW_hh_carer <- data.table::fread("Input/Census_EW/census_2021_c08_hh_carer.csv",
+    #                                         header = TRUE, skip = 0)
+    # dt_EW_hh_carer <- janitor::clean_names(dt_EW_hh_carer)
+    # dt_EW_hh_carer <- copy(dt_EW_hh_carer[
+    #   number_of_unpaid_carers_in_household_6_categories_code != -8L,
+    #   .(LSOA21CD  = lower_layer_super_output_areas_code,
+    #     hh_carer  = number_of_unpaid_carers_in_household_6_categories_code, 
+    #     N_hh      = observation)])
+      
+    # # recoding; 
+    # dt_EW_hh_carer[, hh_carer := paste0("hh_carer_0",hh_carer)]
+    # dt_EW_hh_carer <- copy(dt_EW_hh_carer[,
+    #                                               .(LSOA21CD, hh_carer, N_hh)])
+    # dt_EW_hh_carer <- data.table::dcast(dt_EW_hh_carer,
+    #                                         LSOA21CD ~ hh_carer)
+    # dt_EW_hh_carer <- .BasicClean(dt_EW_hh_carer)            
+      
+    # dt_EW_hh_carer <- copy(dt_EW_hh_carer[,
+    #           .(LSOA21CD, hh_carer_00, hh_carer_01,
+    #             hh_carer_02p = hh_carer_02 + hh_carer_03 + hh_carer_04)])
+      
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_carer_dim <- dim(dt_EW_hh_carer)[[2]]
+    # dt_EW_hh_carer[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_carer_dim]
+    # dt_EW_hh_carer <- merge(x = dt_EW_hh_carer, y = dt_EW_master_number_hh, by = "LSOA21CD")
+      
+    # dt_EW_hh_carer <- .PropAdjustZero(dt_in = dt_EW_hh_carer,
+    #                                       total_in = "row_sum_master",
+    #                                       definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_carer[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_carer_dim]
+    # dt_EW_hh_carer_diag <- .PropDiag(dt_in = dt_EW_hh_carer)
+    # #data.table::fwrite(dt_EW_hh_carer_diag, "Output/Constraints/diag_c08_dt_EW_hh_carer.csv")
+      
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_carer <- copy(dt_EW_hh_carer[,1:dt_EW_hh_carer_dim])
+    # data.table::setnames(dt_EW_hh_carer, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_carer, areacode)
+    # # in next step
+      
+    # # ---------------------------------------------------------------------------- #
+    # # ---------------------------------------------------------------------------- #
+      
+  ### c15: HH Deprivation ### 
+    # dt_EW_hh_deprivation <- data.table::fread("Input/Census_EW/census_2021_c15_deprivation.csv",
+    #                                           header = TRUE, skip = 0)
+    # dt_EW_hh_deprivation <- janitor::clean_names(dt_EW_hh_deprivation)
+    # dt_EW_hh_deprivation <- copy(dt_EW_hh_deprivation[
+    #   household_deprivation_6_categories_code != -8L,
+    #   .(LSOA21CD  = lower_layer_super_output_areas_code,
+    #     hh_deprivation_code  = household_deprivation_6_categories_code, 
+    #     N_hh      = observation)])
+
+    # # recoding; 
+    # dt_EW_hh_deprivation[, hh_deprivation := as.character(NA)]
+    # dt_EW_hh_deprivation[hh_deprivation_code %in% c("1"), hh_deprivation := "hh_deprivation_00"]
+    # dt_EW_hh_deprivation[hh_deprivation_code %in% c("2"), hh_deprivation := "hh_deprivation_01"]
+    # dt_EW_hh_deprivation[hh_deprivation_code %in% c("3"), hh_deprivation := "hh_deprivation_02"]
+    # dt_EW_hh_deprivation[hh_deprivation_code %in% c("4"), hh_deprivation := "hh_deprivation_03"]
+    # dt_EW_hh_deprivation[hh_deprivation_code %in% c("5"), hh_deprivation := "hh_deprivation_04"]
+
+    # dt_EW_hh_deprivation <- data.table::dcast(dt_EW_hh_deprivation[,
+    #                   .(LSOA21CD, hh_deprivation, N_hh)], LSOA21CD ~ hh_deprivation)
+    # dt_EW_hh_deprivation <- .BasicClean(dt_EW_hh_deprivation)            
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_hh_deprivation_dim <- dim(dt_EW_hh_deprivation)[[2]]
+    # dt_EW_hh_deprivation[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_hh_deprivation_dim]
+    # dt_EW_hh_deprivation <- merge(x = dt_EW_hh_deprivation, y = dt_EW_master_number_hh, by = "LSOA21CD")
+
+    # dt_EW_hh_deprivation <- .PropAdjustZero(dt_in = dt_EW_hh_deprivation,
+    #                                       total_in = "row_sum_master",
+    #                                       definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_hh_deprivation[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_hh_deprivation_dim]
+    # dt_EW_hh_deprivation_diag <- .PropDiag(dt_in = dt_EW_hh_deprivation)
+    # #data.table::fwrite(dt_EW_hh_deprivation_diag, "Output/Constraints/diag_c15_dt_EW_hh_deprivation.csv")
+      
+    # # reduce, key and safe constraints table
+    # dt_EW_hh_deprivation <- copy(dt_EW_hh_deprivation[,1:dt_EW_hh_deprivation_dim])
+    # data.table::setnames(dt_EW_hh_deprivation, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_hh_deprivation, areacode)
+    # # in next step
+
+  ### Master Number of Individuals For Proportional Adjustments ###
+    # All Ages #
+    dt_EW_master_number_ind_all <- data.table::fread(
+      "Input/Census_EW/census_2021_c09_ind_age_sex.csv")
+    dt_EW_master_number_ind_all <- janitor::clean_names(dt_EW_master_number_ind_all)
+    dt_EW_master_number_ind_all <- copy(dt_EW_master_number_ind_all[,
+                                                                  .(LSOA21CD  = lower_layer_super_output_areas_code,
+                                                                    sex  = sex_2_categories, 
+                                                                    age  = age_6_categories,
+                                                                    N = observation)])
+    dt_EW_master_number_ind_all <- copy(dt_EW_master_number_ind_all[,
+                                                                  .(row_sum_master = sum(N)), by = c("LSOA21CD")])
+
+    # Adults Only # 
+    dt_EW_master_number_ind_16over <- data.table::fread(
+      "Input/Census_EW/census_2021_c09_ind_age_sex.csv")
+    dt_EW_master_number_ind_16over <- janitor::clean_names(dt_EW_master_number_ind_16over)
+    dt_EW_master_number_ind_16over <- copy(dt_EW_master_number_ind_16over[
+      age_6_categories != "Aged 15 years and under",
+      .(LSOA21CD  = lower_layer_super_output_areas_code,
+        sex  = sex_2_categories, 
+        age  = age_6_categories,
+        N = observation)])
+    dt_EW_master_number_ind_16over <- copy(dt_EW_master_number_ind_16over[,
+                                  .(row_sum_master = sum(N)), by = c("LSOA21CD")])
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c09: Age-Sex: Usual Resident Population Concept ### 
+
+    # load data
+    dt_EW_ind_sex_age <- data.table::fread("Input/Census_EW/census_2021_c09_ind_age_sex.csv")
+    dt_EW_ind_sex_age <- janitor::clean_names(dt_EW_ind_sex_age)
+    dt_EW_ind_sex_age <- copy(dt_EW_ind_sex_age[,
+                                              .(LSOA21CD  = lower_layer_super_output_areas_code,
+                                                sex  = sex_2_categories, 
+                                                age  = age_6_categories,
+                                                N = observation)])
+    # recode sex and age 
+    dt_EW_ind_sex_age[sex == "Female", sex := "f"]
+    dt_EW_ind_sex_age[sex == "Male", sex := "m"]
+    dt_EW_ind_sex_age[age == "Aged 15 years and under", age := "00_15"]
+    dt_EW_ind_sex_age[age == "Aged 16 to 24 years", age := "16_24"]
+    dt_EW_ind_sex_age[age == "Aged 25 to 34 years", age := "25_34"]
+    dt_EW_ind_sex_age[age == "Aged 35 to 49 years", age := "35_49"]
+    dt_EW_ind_sex_age[age == "Aged 50 to 64 years", age := "50_64"]
+    dt_EW_ind_sex_age[age == "Aged 65 years and over", age := "65p"]
+    dt_EW_ind_sex_age[, sex_age := paste0(sex,"_",age)]
+    dt_EW_ind_sex_age <- copy(dt_EW_ind_sex_age[, .(LSOA21CD, sex_age, N)])
+    dt_EW_ind_sex_age <- data.table::dcast(dt_EW_ind_sex_age, LSOA21CD ~ sex_age)
+    dt_EW_ind_sex_age <- .BasicClean(dt_EW_ind_sex_age)
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_ind_sex_age_dim <- dim(dt_EW_ind_sex_age)[[2]]
+    dt_EW_ind_sex_age[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_sex_age_dim] 
+    dt_EW_ind_sex_age <- merge(x = dt_EW_ind_sex_age,
+                              y = dt_EW_master_number_ind_all[, .(LSOA21CD, row_sum_master)],
+                              by = "LSOA21CD")
+    dt_EW_ind_sex_age <- .PropAdjustZero(
+      dt_in = dt_EW_ind_sex_age, total_in = "row_sum_master", definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_ind_sex_age[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_sex_age_dim]
+    dt_EW_ind_sex_age_diag <- .PropDiag(dt_in = dt_EW_ind_sex_age)
+    #data.table::fwrite(dt_EW_ind_sex_age_diag, "Output/Constraints/diag_c09_dt_EW_ind_sex_age.csv")
+
+    # finalise constraint dataset 
+    dt_EW_ind_sex_age <- copy(dt_EW_ind_sex_age[,1:dt_EW_ind_sex_age_dim])
+    data.table::setnames(dt_EW_ind_sex_age, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_ind_sex_age, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c10: Education ### 
+    dt_EW_ind_education <- data.table::fread("Input/Census_EW/census_2021_c10_ind_education.csv",
+                                            header = TRUE, skip = 0)
+    # run basic clean
+    dt_EW_ind_education <- janitor::clean_names(dt_EW_ind_education)
+    dt_EW_ind_education <- copy(dt_EW_ind_education[highest_level_of_qualification_7_categories_code != -8,
+                                                  .(LSOA21CD  = lower_layer_super_output_areas_code,
+                                                    edu_code  = highest_level_of_qualification_7_categories_code, 
+                                                    edu_cat  = highest_level_of_qualification_7_categories,
+                                                    N = observation)])
+    # recoding;
+    dt_EW_ind_education[edu_code == 0, edu := "no_qualification"]
+    dt_EW_ind_education[edu_code == 1 , edu := "lower_school"]
+    dt_EW_ind_education[edu_code == 2 | edu_code == 3, edu := "upper_further"]
+    dt_EW_ind_education[edu_code == 4, edu := "degree_level"]
+    dt_EW_ind_education[edu_code == 5, edu := "education_other"]
+
+    # aggregation
+    dt_EW_ind_education <- copy(dt_EW_ind_education[, .(N = sum(N)),
+                                                  by = c("LSOA21CD","edu")])
+
+    dt_EW_ind_education <- data.table::dcast(dt_EW_ind_education, LSOA21CD ~ edu)
+    dt_EW_ind_education <- .BasicClean(dt_EW_ind_education)
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_ind_education_dim <- dim(dt_EW_ind_education)[[2]]
+    dt_EW_ind_education[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_education_dim] 
+    dt_EW_ind_education <- merge(x = dt_EW_ind_education,
+                                y = dt_EW_master_number_ind_16over[, .(LSOA21CD, row_sum_master)],
+                                by = "LSOA21CD")
+    dt_EW_ind_education <- .PropAdjustZero(
+      dt_in = dt_EW_ind_education, total_in = "row_sum_master", definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_ind_education[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_education_dim]
+    dt_EW_ind_education_diag <- .PropDiag(dt_in = dt_EW_ind_education)
+    #data.table::fwrite(dt_EW_ind_education_diag, "Output/Constraints/diag_c10_dt_EW_ind_education.csv")
+
+    # finalise constraint dataset 
+    dt_EW_ind_education <- copy(dt_EW_ind_education[,1:dt_EW_ind_education_dim])
+    data.table::setnames(dt_EW_ind_education, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_ind_education, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c11: Ethnicity ### 
+    dt_EW_ind_ethnicity <- data.table::fread("Input/Census_EW/census_2021_c11_ind_ethnicity.csv",
+                                            header = TRUE, skip = 0)
+    # run basic clean
+    dt_EW_ind_ethnicity <- janitor::clean_names(dt_EW_ind_ethnicity)
+    dt_EW_ind_ethnicity <- copy(dt_EW_ind_ethnicity[ethnic_group_20_categories_code != -8,
+                                                  .(LSOA21CD  = lower_layer_super_output_areas_code,
+                                                    ethn_code  = as.character(ethnic_group_20_categories_code),
+                                                    ethn_cat  = as.character(ethnic_group_20_categories),
+                                                    N = observation)])
+
+    # recoding;
+    dt_EW_ind_ethnicity[, ethn := as.character(NA)]
+    dt_EW_ind_ethnicity[ethn_code %in% c("1","2","3","4","5"), ethn := "asian"]
+    dt_EW_ind_ethnicity[ethn_code %in% c("6","8"), ethn := "african"]
+    dt_EW_ind_ethnicity[ethn_code %in% c("7"), ethn := "caribbean_black"]
+    dt_EW_ind_ethnicity[ethn_code %in% c("9","10","11","12"), ethn := "mixed"]
+    dt_EW_ind_ethnicity[ethn_code %in% c("13","14","15","16", "17"), ethn := "white"]
+    dt_EW_ind_ethnicity[ethn_code %in% c("18","19"), ethn := "ethnicity_other"]
+
+    # aggregation
+    dt_EW_ind_ethnicity <- copy(dt_EW_ind_ethnicity[, .(N = sum(N)),
+                                                  by = c("LSOA21CD","ethn")])
+
+    dt_EW_ind_ethnicity <- data.table::dcast(dt_EW_ind_ethnicity, LSOA21CD ~ ethn)
+    dt_EW_ind_ethnicity <- .BasicClean(dt_EW_ind_ethnicity)
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_ind_ethnicity_dim <- dim(dt_EW_ind_ethnicity)[[2]]
+    dt_EW_ind_ethnicity[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_ethnicity_dim] 
+    dt_EW_ind_ethnicity <- merge(x = dt_EW_ind_ethnicity,
+                                y = dt_EW_master_number_ind_all[, .(LSOA21CD, row_sum_master)],
+                                by = "LSOA21CD")
+    dt_EW_ind_ethnicity <- .PropAdjustZero(
+      dt_in = dt_EW_ind_ethnicity, total_in = "row_sum_master", definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_ind_ethnicity[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_ethnicity_dim]
+    dt_EW_ind_ethnicity_diag <- .PropDiag(dt_in = dt_EW_ind_ethnicity)
+    #data.table::fwrite(dt_EW_ind_ethnicity_diag, "Output/Constraints/diag_c11_dt_EW_ind_ethnicity.csv")
+
+    # finalise constraint dataset 
+    dt_EW_ind_ethnicity <- copy(dt_EW_ind_ethnicity[,1:dt_EW_ind_ethnicity_dim])
+    data.table::setnames(dt_EW_ind_ethnicity, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_ind_ethnicity, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c12: Partnership ### 
+    # dt_EW_ind_partnership <- data.table::fread("Input/Census_EW/census_2021_c12_ind_partnership.csv",
+    #                                           header = TRUE, skip = 0)
+    # # run basic clean
+    # dt_EW_ind_partnership <- janitor::clean_names(dt_EW_ind_partnership)
+    # dt_EW_ind_partnership <- copy(dt_EW_ind_partnership[
+    #   marital_and_civil_partnership_status_6_categories_code != -8,
+    #   .(LSOA21CD  = lower_layer_super_output_areas_code,
+    #     partnership_code  = as.character(marital_and_civil_partnership_status_6_categories_code),
+    #     partnership_cat  = as.character(marital_and_civil_partnership_status_6_categories),
+    #     N = observation)])
+
+    # # recoding;
+    # dt_EW_ind_partnership[, marstat := as.character(NA)]
+    # dt_EW_ind_partnership[partnership_code %in% c("1"), marstat := "single"]
+    # dt_EW_ind_partnership[partnership_code %in% c("2"), marstat := "married_civil"]
+    # dt_EW_ind_partnership[partnership_code %in% c("3"), marstat := "separated"]
+    # dt_EW_ind_partnership[partnership_code %in% c("4"), marstat := "divorced"]
+    # dt_EW_ind_partnership[partnership_code %in% c("5"), marstat := "widowed"]
+
+    # # aggregation
+    # dt_EW_ind_partnership <- copy(dt_EW_ind_partnership[, .(N = sum(N)),
+    #                                                   by = c("LSOA21CD","marstat")])
+
+    # dt_EW_ind_partnership <- data.table::dcast(dt_EW_ind_partnership, LSOA21CD ~ marstat)
+    # dt_EW_ind_partnership <- .BasicClean(dt_EW_ind_partnership)
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_ind_partnership_dim <- dim(dt_EW_ind_partnership)[[2]]
+    # dt_EW_ind_partnership[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_partnership_dim] 
+    # dt_EW_ind_partnership <- merge(x = dt_EW_ind_partnership,
+    #                               y = dt_EW_master_number_ind_16over[, .(LSOA21CD, row_sum_master)],
+    #                               by = "LSOA21CD")
+    # dt_EW_ind_partnership <- .PropAdjustZero(
+    #   dt_in = dt_EW_ind_partnership, total_in = "row_sum_master", definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_ind_partnership[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_partnership_dim]
+    # dt_EW_ind_partnership_diag <- .PropDiag(dt_in = dt_EW_ind_partnership)
+    # #data.table::fwrite(dt_EW_ind_partnership_diag, "Output/Constraints/diag_c12_dt_EW_ind_partnership.csv")
+
+    # # finalise constraint dataset 
+    # dt_EW_ind_partnership <- copy(dt_EW_ind_partnership[,1:dt_EW_ind_partnership_dim])
+    # data.table::setnames(dt_EW_ind_partnership, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_ind_partnership, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c13: General Health ### 
+    dt_EW_ind_health <- data.table::fread("Input/Census_EW/census_2021_c13_ind_health.csv",
+                                        header = TRUE, skip = 0)
+    # run basic clean
+    dt_EW_ind_health <- janitor::clean_names(dt_EW_ind_health)
+    dt_EW_ind_health <- copy(dt_EW_ind_health[
+      general_health_6_categories_code != -8 & age_3_categories_code != 1,
+      .(LSOA21CD  = lower_layer_super_output_areas_code,
+        health_code  = as.character(general_health_6_categories_code),
+        health_cat  = as.character(general_health_6_categories),
+        N = observation)])
+
+    # recoding;
+    dt_EW_ind_health[, health := as.character(NA)]
+    dt_EW_ind_health[health_code %in% c("1"), health := "very_good"]
+    dt_EW_ind_health[health_code %in% c("2"), health := "good"]
+    dt_EW_ind_health[health_code %in% c("3"), health := "fair"]
+    dt_EW_ind_health[health_code %in% c("4", "5"), health := "bad"]
+
+    # aggregation
+    dt_EW_ind_health <- copy(dt_EW_ind_health[, .(N = sum(N)),
+                                            by = c("LSOA21CD","health")])
+
+    dt_EW_ind_health <- data.table::dcast(dt_EW_ind_health, LSOA21CD ~ health)
+    dt_EW_ind_health <- .BasicClean(dt_EW_ind_health)
+
+    # apply proportional adjustment ("proportional boosting") 
+    dt_EW_ind_health_dim <- dim(dt_EW_ind_health)[[2]]
+    dt_EW_ind_health[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_health_dim] 
+    dt_EW_ind_health <- merge(x = dt_EW_ind_health,
+                            y = dt_EW_master_number_ind_16over[, .(LSOA21CD, row_sum_master)],
+                            by = "LSOA21CD")
+    dt_EW_ind_health <- .PropAdjustZero(
+      dt_in = dt_EW_ind_health, total_in = "row_sum_master", definitions = l_definitions)
+
+    # proportional adjustment diagnostics
+    dt_EW_ind_health[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_health_dim]
+    dt_EW_ind_health_diag <- .PropDiag(dt_in = dt_EW_ind_health)
+    #data.table::fwrite(dt_EW_ind_partnership_diag, "Output/Constraints/diag_c13_dt_EW_ind_health.csv")
+
+    # finalise constraint dataset 
+    dt_EW_ind_health <- copy(dt_EW_ind_health[,1:dt_EW_ind_health_dim])
+    data.table::setnames(dt_EW_ind_health, old = l_definitions$agg_level_EW, new = "areacode")
+    setkey(dt_EW_ind_health, areacode)
+
+    # ---------------------------------------------------------------------------- #
+    # ---------------------------------------------------------------------------- #
+
+  ### c14: Economic Activity ### 
+    # dt_EW_ind_activity <- data.table::fread("Input/Census_EW/census_2021_c14_ind_activity.csv",
+    #                                       header = TRUE, skip = 0)
+    # # run basic clean
+    # dt_EW_ind_activity <- janitor::clean_names(dt_EW_ind_activity)
+    # dt_EW_ind_activity <- copy(dt_EW_ind_activity[
+    #   economic_activity_status_12_categories_code != -8,
+    #   .(LSOA21CD  = lower_layer_super_output_areas_code,
+    #     activity_code  = as.character(economic_activity_status_12_categories_code),
+    #     activity_cat  = as.character(economic_activity_status_12_categories),
+    #     N = observation)])
+
+    # # recoding;
+    # dt_EW_ind_activity[, activity := as.character(NA)]
+    # dt_EW_ind_activity[activity_code %in% c("1"), activity := "employed"]
+    # dt_EW_ind_activity[activity_code %in% c("2","3"), activity := "self_employed"]
+    # dt_EW_ind_activity[activity_code %in% c("4"), activity := "unemployed"]
+    # dt_EW_ind_activity[activity_code %in% c("5", "8", "6"), activity := "student_ft"]
+    # dt_EW_ind_activity[activity_code %in% c("7"), activity := "retired"]
+    # dt_EW_ind_activity[activity_code %in% c("9"), activity := "looking_after_home"]
+    # dt_EW_ind_activity[activity_code %in% c("10"), activity := "lts_disabled"]
+    # dt_EW_ind_activity[activity_code %in% c("11"), activity := "activity_other"]
+
+    # # aggregation
+    # dt_EW_ind_activity <- copy(dt_EW_ind_activity[, .(N = sum(N)),
+    #                                             by = c("LSOA21CD","activity")])
+
+    # dt_EW_ind_activity <- data.table::dcast(dt_EW_ind_activity, LSOA21CD ~ activity)
+    # dt_EW_ind_activity <- .BasicClean(dt_EW_ind_activity)
+
+    # # apply proportional adjustment ("proportional boosting") 
+    # dt_EW_ind_activity_dim <- dim(dt_EW_ind_activity)[[2]]
+    # dt_EW_ind_activity[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_activity_dim] 
+    # dt_EW_ind_activity <- merge(x = dt_EW_ind_activity,
+    #                           y = dt_EW_master_number_ind_16over[, .(LSOA21CD, row_sum_master)],
+    #                           by = "LSOA21CD")
+    # dt_EW_ind_activity <- .PropAdjustZero(
+    #   dt_in = dt_EW_ind_activity, total_in = "row_sum_master", definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    # dt_EW_ind_activity[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_activity_dim]
+    # dt_EW_ind_activity_diag <- .PropDiag(dt_in = dt_EW_ind_activity)
+    # #data.table::fwrite(dt_EW_ind_partnership_diag, "Output/Constraints/diag_c14_dt_EW_ind_activity.csv")
+
+    # # finalise constraint dataset 
+    # dt_EW_ind_activity <- copy(dt_EW_ind_activity[,1:dt_EW_ind_activity_dim])
+    # data.table::setnames(dt_EW_ind_activity, old = l_definitions$agg_level_EW, new = "areacode")
+    # setkey(dt_EW_ind_activity, areacode)
+
+  ### c16: dis Binary ### 
+    # load in 
+      census_dis <- data.table::fread("Input/Census_EW/census_2021_c16_ind_disability.csv", # 1 = NO / 2 = YES Central dis
+                                          header = TRUE, skip = 0)
+      dt_EW_ind_dis <- census_dis
+    # change spaces in colnames to _
+      names(dt_EW_ind_dis) <- gsub(" ", "_", names(dt_EW_ind_dis))
+    
+    # collapse 4 dis categories to 2 
+      # Convert to data.table
+      library(data.table)
+      setDT(dt_EW_ind_dis)
+
+      # Drop NA category (-8)
+      dt_EW_ind_dis <- dt_EW_ind_dis[`Disability_(5_categories)_Code` != "-8"]
+
+      # Recode to 2 categories
+      dt_EW_ind_dis[
+        `Disability_(5_categories)_Code` %in% c("3", "4"),
+        `Disability_(5_categories)_Code` := "0"]
+
+      dt_EW_ind_dis[
+        `Disability_(5_categories)_Code` %in% c("1", "2"),
+        `Disability_(5_categories)_Code` := "1"]
+
+      # Select and rename columns 
+      dt_EW_ind_dis <- dt_EW_ind_dis[, .(
+        LSOA21CD = `Lower_layer_Super_Output_Areas_Code`,
+        sex      = `Sex_(2_categories)_Code`,
+        age      = `Age_(6_categories)_Code`,
+        dis = `Disability_(5_categories)_Code`,
+        N        = Observation
+      )]
+
+      # Aggregate 
+      dt_EW_ind_dis <- dt_EW_ind_dis[
+        , .(N = sum(N, na.rm = TRUE)),
+        by = .(LSOA21CD, sex, age, dis)
+      ]
+
+    # # Reshape before prop adjustment 
+    #   dt_EW_ind_dis[, sex_age_dis := paste0(sex, "_", age, "_", dis)]
+    #   dt_EW_ind_dis <- dcast(dt_EW_ind_dis, LSOA21CD ~ sex_age_dis, value.var = "N")
+
+    # # apply proportional adjustment ("proportional boosting") 
+    #   dt_EW_ind_dis_dim <- dim(dt_EW_ind_dis)[[2]]
+    #   dt_EW_ind_dis[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_dis_dim] 
+    #   dt_EW_ind_dis <- merge(x = dt_EW_ind_dis,
+    #                             y = dt_EW_master_number_ind_all[, .(LSOA21CD, row_sum_master)],
+    #                             by = "LSOA21CD")
+    #   dt_EW_ind_dis <- .PropAdjustZero(
+    #     dt_in = dt_EW_ind_dis, total_in = "row_sum_master", definitions = l_definitions)
+
+    # # proportional adjustment diagnostics
+    #   dt_EW_ind_dis[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_dis_dim]
+    #   dt_EW_ind_dis_diag <- .PropDiag(dt_in = dt_EW_ind_dis)
+    #   data.table::fwrite(dt_EW_ind_dis_diag, "Output/Constraints/diag_c16_dt_EW_ind_dis.csv")
+
+    # # finalise constraint dataset 
+    #   dt_EW_ind_dis <- copy(dt_EW_ind_dis[,1:dt_EW_ind_dis_dim])
+    #   data.table::setnames(dt_EW_ind_dis, old = l_definitions$agg_level_EW, new = "areacode")
+    #   setkey(dt_EW_ind_dis, areacode)
+
+      # save 
+        write.csv(dt_EW_ind_dis, "Input/Census_EW/census2021_c16_ind_dis.csv")
+
+
+  ### c17: dis Binary Simulated ### 
+    # still based on sex and age, just aggregated to hh later on
+    # load in
+      census_as <- data.table::fread("Input/Census_EW/census2021_c09_ind_age_sex.csv")
+      dis_probs_as <- data.table::fread("Input/Census_EW/agg_cca_preds.csv") 
+    # apply age/sex probabilities at individual level 
+      # align colnames 
+      names(census_as)[names(census_as) == "Sex (2 categories) Code"] <- "sex" 
+      names(census_as)[names(census_as) == "Age (6 categories) Code"] <- "age6" 
+      # simulate based on sex and age, but don't restructure data 
+
+      dis_probs_as$age6 <- as.integer(dis_probs_as$age6)
+      dis_probs_as[which(dis_probs_as$sex == 1), 'sex'] <- 3 # Get 1 out of here 
+      dis_probs_as[which(dis_probs_as$sex == 2), 'sex'] <- 1 # census uses 1 as female
+      dis_probs_as[which(dis_probs_as$sex == 3), 'sex'] <- 2 # census uses 2 as male 
+
+    # Merge aggregate probabilities onto census data 
+      census_dis_as <- merge(census_as, dis_probs_as, 
+                              by = c("sex", "age6"))
+      
+      # Bernoulli draws
+        # now apply probs, given the shape of the census data (totals of inds)...
+        # repeat a draw for n in each cell, and then add each type of response for each cell
+        # merge probabilities onto census counts by age6 and sex
+        census_dis_as_sim <- merge(census_as, 
+                              dis_probs_as[, .(age6, sex, p_hat)],  # only keep needed cols
+                              by = c("age6", "sex"),
+                              all.x = TRUE)
+        # check for any unmatched groups (should be zero)
+        cat("NAs in p_hat after merge:", sum(is.na(census_dis_as_sim$p_hat)), "\n")
+
+        # Bernoulli draws: size = Observation (N people in each LSOA/age/sex group)
+        set.seed(123)
+        census_dis_as_sim[, n_dis_sim    := rbinom(n = .N, size = Observation, prob = p_hat)]
+        census_dis_as_sim[, n_no_dis_sim := Observation - n_dis_sim]
+
+      # match other constraints data 
+        # Start from simulated data
+        dt_EW_ind_dis_sim <- copy(census_dis_as_sim)
+
+        # Create consistent ID column
+        dt_EW_ind_dis_sim[, LSOA21CD := `Lower layer Super Output Areas Code`]
+
+        # Recode core variables
+        dt_EW_ind_dis_sim[, `:=`(
+        sex = as.character(sex),
+        age = as.character(age6)
+        )]
+      
+      # Select and rename columns
+      dt_EW_ind_dis_sim <- dt_EW_ind_dis_sim[, .(
+        LSOA21CD      = LSOA21CD,
+        sex           = sex,
+        age           = age6,
+        dis    = n_dis_sim,
+        no_dis = n_no_dis_sim
+      )]
+
+      # Aggregate
+      dt_EW_ind_dis_sim <- dt_EW_ind_dis_sim[
+        , .(dis    = sum(dis, na.rm = TRUE),
+            no_dis = sum(no_dis, na.rm = TRUE)),
+        by = .(LSOA21CD, sex, age)
+      ]
+
+        # # Apply proportional adjustment ("proportional boosting")
+        # dt_EW_ind_dis_sim_dim <- dim(dt_EW_ind_dis_sim)[[2]]
+        # dt_EW_ind_dis_sim[, row_sum_old := rowSums(.SD), .SDcols = 4:dt_EW_ind_dis_sim_dim]
+        # dt_EW_ind_dis_sim <- merge(x = dt_EW_ind_dis_sim,
+        #                           y = dt_EW_master_number_ind_all[, .(LSOA21CD, row_sum_master)],
+        #                           by = "LSOA21CD")
+        # dt_EW_ind_dis_sim <- .PropAdjustZero(
+        #   dt_in = dt_EW_ind_dis_sim, total_in = "row_sum_master", definitions = l_definitions)
+
+        # # proportional adjustment diagnostics
+        # dt_EW_ind_dis_sim[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_dis_sim_dim]
+        # dt_EW_ind_dis_sim_diag <- .PropDiag(dt_in = dt_EW_ind_dis_sim)
+        # data.table::fwrite(dt_EW_ind_dis_sim_diag, "Output/Constraints/diag_c17_dt_EW_ind_dis_sim.csv")
+
+    # finalise constraint dataset 
+      # dt_EW_ind_dis_sim <- copy(dt_EW_ind_dis_sim[,1:dt_EW_ind_dis_sim_dim])
+      data.table::setnames(dt_EW_ind_dis_sim, old = l_definitions$agg_level_EW, new = "areacode")
+      setkey(dt_EW_ind_dis_sim, areacode)
+
+      # save 
+        write.csv(dt_EW_ind_dis_sim, "Input/Census_EW/census2021_c17_ind_dis_sim.csv")
+
+
+  ### c18: dis Sex and Age ###
+    # recode sex and age from dis binary 
+      dt_EW_ind_sex_age_dis <- copy(dt_EW_ind_dis)
+          dt_EW_ind_sex_age_dis[, `:=`(
+            sex = as.character(sex),
+            age = as.character(age),
+            dis = as.character(dis)
+          )]
+
+          dt_EW_ind_sex_age_dis[sex == "1", sex := "f"]
+          dt_EW_ind_sex_age_dis[sex == "2", sex := "m"]
+          dt_EW_ind_sex_age_dis[age == "1", age := "00_15"]
+          dt_EW_ind_sex_age_dis[age == "2", age := "16_24"]
+          dt_EW_ind_sex_age_dis[age == "3", age := "25_34"]
+          dt_EW_ind_sex_age_dis[age == "4", age := "35_49"]
+          dt_EW_ind_sex_age_dis[age == "5", age := "50_64"]
+          dt_EW_ind_sex_age_dis[age == "6", age := "65p"]
+          dt_EW_ind_sex_age_dis[dis == "0", dis := "dis0"]
+          dt_EW_ind_sex_age_dis[dis == "1", dis := "dis1"]
+
+          dt_EW_ind_sex_age_dis[, sex_age_dis := paste0(sex,"_",age,"_",dis)]
+          dt_EW_ind_sex_age_dis <- copy(dt_EW_ind_sex_age_dis[, .(LSOA21CD, sex_age_dis, N)])
+          dt_EW_ind_sex_age_dis <- data.table::dcast(dt_EW_ind_sex_age_dis, LSOA21CD ~ sex_age_dis)
+          dt_EW_ind_sex_age_dis <- .BasicClean(dt_EW_ind_sex_age_dis)
+
+        # (proportional adjustment skipped for this table)
+
+        # finalise constraint dataset 
+          dt_EW_ind_sex_age_dis_dim <- dim(dt_EW_ind_sex_age_dis)[[2]]
+          dt_EW_ind_sex_age_dis <- copy(dt_EW_ind_sex_age_dis[,1:dt_EW_ind_sex_age_dis_dim])
+          data.table::setnames(dt_EW_ind_sex_age_dis, old = l_definitions$agg_level_EW, new = "areacode")
+          setkey(dt_EW_ind_sex_age_dis, areacode)
+
+        # save 
+          write.csv(dt_EW_ind_sex_age_dis, "Input/Census_EW/census2021_c18_ind_sex_age_dis.csv")
+
+  ### c19: dis Sex and Age Simulated ###
+    # reshape sex and age 
+      # Start from simulated data
+      dt_EW_ind_sex_age_dis_sim <- copy(dt_EW_ind_dis_sim)
+      setnames(dt_EW_ind_sex_age_dis_sim, "areacode", "LSOA21CD")
+
+      # convert wide to long 
+      dt_EW_ind_sex_age_dis_sim <- melt(
+      dt_EW_ind_sex_age_dis_sim,
+      id.vars = c("LSOA21CD", "sex", "age"),
+      measure.vars = c("dis", "no_dis"),
+      variable.name = "dis_status",
+      value.name = "N"
+      )
+
+      # recode 
+      dt_EW_ind_sex_age_dis_sim[, age := as.character(age)]
+
+      dt_EW_ind_sex_age_dis_sim[sex == "1", sex := "f"]
+      dt_EW_ind_sex_age_dis_sim[sex == "2", sex := "m"]
+      dt_EW_ind_sex_age_dis_sim[age == "1", age := "00_15"]
+      dt_EW_ind_sex_age_dis_sim[age == "2", age := "16_24"]
+      dt_EW_ind_sex_age_dis_sim[age == "3", age := "25_34"]
+      dt_EW_ind_sex_age_dis_sim[age == "4", age := "35_49"]
+      dt_EW_ind_sex_age_dis_sim[age == "5", age := "50_64"]
+      dt_EW_ind_sex_age_dis_sim[age == "6", age := "65p"]
+
+      # dis (from melted column names)
+      dt_EW_ind_sex_age_dis_sim[dis_status == "dis", dis_status := "dis1_sim"]
+      dt_EW_ind_sex_age_dis_sim[dis_status == "no_dis", dis_status := "dis0_sim"]
+
+      dt_EW_ind_sex_age_dis_sim[, sex_age_dis_sim := paste0(sex,"_",age,"_",dis_status)]
+      dt_EW_ind_sex_age_dis_sim <- copy(dt_EW_ind_sex_age_dis_sim[, .(LSOA21CD, sex_age_dis_sim, N)])
+      dt_EW_ind_sex_age_dis_sim <- data.table::dcast(dt_EW_ind_sex_age_dis_sim, LSOA21CD ~ sex_age_dis_sim)
+      dt_EW_ind_sex_age_dis_sim <- .BasicClean(dt_EW_ind_sex_age_dis_sim)
+    
+      # apply proportional adjustment ("proportional boosting") 
+        dt_EW_ind_sex_age_dis_sim_dim <- dim(dt_EW_ind_sex_age_dis_sim)[[2]]
+        dt_EW_ind_sex_age_dis_sim[, row_sum_old := rowSums(.SD), .SDcols = 2:dt_EW_ind_sex_age_dis_sim_dim] 
+        dt_EW_ind_sex_age_dis_sim <- merge(
+          x = dt_EW_ind_sex_age_dis_sim,
+          y = dt_EW_master_number_ind_all[, .(LSOA21CD, row_sum_master)],
+          by = "LSOA21CD"
+        )
+        
+        dt_EW_ind_sex_age_dis_sim <- .PropAdjustZero(
+          dt_in = dt_EW_ind_sex_age_dis_sim, total_in = "row_sum_master", definitions = l_definitions)
+
+        # proportional adjustment diagnostics
+        dt_EW_ind_sex_age_dis_sim[, row_sum_new := rowSums(.SD), .SDcols = 2:dt_EW_ind_sex_age_dis_sim_dim]
+        dt_EW_ind_sex_age_dis_sim_diag <- .PropDiag(dt_in = dt_EW_ind_sex_age_dis_sim)
+        data.table::fwrite(dt_EW_ind_sex_age_dis_sim_diag, "Output/Constraints/diag_c19_dt_EW_ind_sex_age_dis_sim.csv")
+
+        # finalise constraint dataset 
+          dt_EW_ind_sex_age_dis_sim <- copy(dt_EW_ind_sex_age_dis_sim[,1:dt_EW_ind_sex_age_dis_sim_dim])
+          data.table::setnames(dt_EW_ind_sex_age_dis_sim, old = "LSOA21CD", new = "areacode")
+          setkey(dt_EW_ind_sex_age_dis_sim, areacode)
+
+      # save 
+        write.csv(dt_EW_ind_sex_age_dis_sim, "Input/Census_EW/census2021_c19_ind_sex_age_dis_sim.csv")
+        # head(dt_EW_ind_sex_age_dis_sim, 10)
+      # ---------------------------------------------------------------------------- #
+      # ---------------------------------------------------------------------------- #
+
+  ### Export Constraints in Go Format ###
+    # bring all constraints into a an mget object, all files have to be in similar format
+      l_EW_cons <- copy(mget(c("dt_EW_hh_urban_rural", "dt_EW_hh_heating", "dt_EW_hh_type", 
+                                  # "dt_EW_hh_tenure_presence_child", "dt_EW_hh_cars_hh_size", "dt_EW_hh_beds_hh_size",
+                                  # "dt_EW_hh_employment_hh_size", "dt_EW_hh_carer", "dt_EW_ind_sex_age",
+                                  "dt_EW_ind_education", "dt_EW_ind_ethnicity", # "dt_EW_ind_partnership", 
+                                  "dt_EW_ind_health", # "dt_EW_ind_activity", "dt_EW_hh_deprivation", 
+                                  # "dt_EW_ind_dis", 
+                                  # "dt_EW_ind_dis_sim", 
+                                  "dt_EW_ind_sex_age_dis", 
+                                  "dt_EW_ind_sex_age_dis_sim")))
+
+        for (i in seq_along(l_EW_cons)) {
+          first_col <- names(l_EW_cons[[i]])[1]
+          if (first_col != "areacode") {
+            setnames(l_EW_cons[[i]], old = first_col, new = "areacode")
+          }
+        }
+
+      # rename all columns to start with "objectname" and "%" 
+          for (i in 1:length(l_EW_cons)) {
+            new_name <- names(l_EW_cons)[i]
+            setnames(l_EW_cons[[i]], 
+                    old = names(l_EW_cons[[i]])[-1], 
+                    new = paste0(new_name,"%",names(l_EW_cons[[i]])[-1]))
+          }
+
+      # merge all columns 
+        dt_EW_constraints <- data.table::data.table(dt_EW_master_number_ind_all[, .(LSOA21CD, population = row_sum_master)])
+        for (i in 1: length(l_EW_cons)) {
+          # merge will ensure that all elements are intersecting (N=46,363))
+          dt_EW_constraints  <- merge(x = dt_EW_constraints, y = l_EW_cons[[i]], 
+                                by.x = "LSOA21CD", by.y = "areacode")
+        }
+
+
+      # save go format dataset
+        setnames(dt_EW_constraints, old = names(dt_EW_constraints), new = sub("^dt_EW_", "", names(dt_EW_constraints)))
+        data.table::fwrite(x = dt_EW_constraints, file = "Output/Constraints/dt_EW_constraints.csv")
+
+      # save supplementary files 
+        data.table::fwrite(x = dt_EW_master_number_hh, file = "Output/Constraints/dt_EW_master_number_hh.csv")
+        data.table::fwrite(x = dt_EW_master_number_ind_all, file = "Output/Constraints/dt_EW_master_number_ind_all.csv")
+        data.table::fwrite(x = dt_EW_master_number_ind_16over, file = "Output/Constraints/dt_EW_master_number_ind_16over.csv")
+
+      # ---------------------------------------------------------------------------- #
+      # ---------------------------------------------------------------------------- #
+
+
+    }
+
+
+  # Check 
+    colnames(dt_EW_constraints)
+    # Reorder to alin with survey and groups 
+      library(data.table)
+      # ---- target column order (excluding population, added back manually) ----
+      target_order <- c(
+        "hh_urban_rural%rural", "hh_urban_rural%urban",
+        "hh_heating%with_heating", "hh_heating%without_heating",
+        "hh_type%one_person_household", "hh_type%lone_parent",
+        "hh_type%couple_married_civil_no_children", "hh_type%couple_married_civil_with_children",
+        "hh_type%other",
+        "ind_education%degree_level", "ind_education%education_other",
+        "ind_education%lower_school", "ind_education%no_qualification", "ind_education%upper_further",
+        "ind_ethnicity%african", "ind_ethnicity%asian", "ind_ethnicity%caribbean_black",
+        "ind_ethnicity%ethnicity_other", "ind_ethnicity%mixed", "ind_ethnicity%white",
+        "ind_health%bad", "ind_health%fair", "ind_health%good", "ind_health%very_good",
+        "ind_sex_age_dis%f_00_15_dis0", "ind_sex_age_dis%f_16_24_dis0", "ind_sex_age_dis%f_25_34_dis0",
+        "ind_sex_age_dis%f_35_49_dis0", "ind_sex_age_dis%f_50_64_dis0", "ind_sex_age_dis%f_65p_dis0",
+        "ind_sex_age_dis%m_00_15_dis0", "ind_sex_age_dis%m_16_24_dis0", "ind_sex_age_dis%m_25_34_dis0",
+        "ind_sex_age_dis%m_35_49_dis0", "ind_sex_age_dis%m_50_64_dis0", "ind_sex_age_dis%m_65p_dis0",
+        "ind_sex_age_dis%f_00_15_dis1", "ind_sex_age_dis%f_16_24_dis1", "ind_sex_age_dis%f_25_34_dis1",
+        "ind_sex_age_dis%f_35_49_dis1", "ind_sex_age_dis%f_50_64_dis1", "ind_sex_age_dis%f_65p_dis1",
+        "ind_sex_age_dis%m_00_15_dis1", "ind_sex_age_dis%m_16_24_dis1", "ind_sex_age_dis%m_25_34_dis1",
+        "ind_sex_age_dis%m_35_49_dis1", "ind_sex_age_dis%m_50_64_dis1", "ind_sex_age_dis%m_65p_dis1"
+      )
+
+      dt <- copy(dt_EW_constraints)
+      setDT(dt)
+
+      # ---- non-sim version ----
+      non_sim <- dt[, .SD, .SDcols = c("LSOA21CD", "population",
+                                        grep("_sim", names(dt), invert = TRUE, value = TRUE)[-(1:2)])]
+      setnames(non_sim, old = names(non_sim), new = gsub("dis", "dis", names(non_sim)))
+      setcolorder(non_sim, c("LSOA21CD", "population", target_order))
+
+      # ---- sim version ----
+      sim <- dt[, .SD, .SDcols = c("LSOA21CD", "population",
+                                    grep("^hh_|^ind_education%|^ind_ethnicity%|^ind_health%",
+                                        names(dt), value = TRUE),
+                                    grep("_sim", names(dt), value = TRUE))]
+      setnames(sim, old = names(sim),
+              new = gsub("_sim$", "", gsub("dis_sim%", "dis%", names(sim))))
+      setcolorder(sim, c("LSOA21CD", "population", target_order))
+
+      # save 
+      fwrite(non_sim, "data/England/census2021_e_go_10.csv")
+      fwrite(sim,     "data/England/census2021_e_go_10_sim.csv")
+
+      # check both match the target exactly
+      identical(names(non_sim)[-(1:2)], target_order)
+      identical(names(sim)[-(1:2)], target_order)
+
+```
