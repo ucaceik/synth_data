@@ -1,0 +1,1915 @@
+```{r multirun full}
+# STEP 0 - Set up
+    print("aaaaand we're back")
+    library(jsonlite)
+    library(data.table)
+
+# STEP 1 - Load full P1/P2 constraints
+
+    setwd("C:/Users/Jamie/Documents/compass")
+ 
+    # File paths
+    p1_con   <- "data/England/census2021_e_go_10.csv"
+    p1_grp   <- "data/England/groups_e_10.csv"
+    p1_micro <- "data/England/us_hh_export_e_go_10.csv"
+    p2_con   <- "data/England/census2021_e_go_10_sim.csv"
+    p2_grp   <- "data/England/groups_e_10_sim.csv"
+    p2_micro <- "data/England/us_hh_export_e_go_10_sim.csv"
+
+    # Drop any vars for testing (and change run tag in Step 3)
+      #   library(data.table)
+      #   drop_pat <- "^hh_heating%"
+      #   suffix   <- "_noheating"
+      #   out <- function(path) sub("\\.csv$", paste0(suffix, ".csv"), path)
+
+      #   # Constraints and microdata: drop the heating columns
+      #   drop_cols <- function(path) {
+      #     dt <- fread(path)
+      #     hits <- grep(drop_pat, names(dt), value = TRUE)
+      #     dt[, (hits) := NULL]
+      #     fwrite(dt, out(path))
+      #     message(basename(path), ": dropped ", length(hits), " cols")
+      #   }
+      #   for (f in c(p1_con, p1_micro, p2_con, p2_micro)) drop_cols(f)
+
+      #   # Groups: drop the heating rows and renumber the groups
+      #   fix_groups <- function(path) {
+      #     grp <- fread(path)
+      #     grp <- grp[!grepl(drop_pat, heading)]
+      #     grp[, group := match(group, unique(group))]
+      #     fwrite(grp, out(path))
+      #     print(grp[, .N, by = group])
+      #   }
+      #   fix_groups(p1_grp)
+      #   fix_groups(p2_grp)
+
+      # # Point compass at new files 
+      #   p1_con <- out(p1_con); p1_grp <- out(p1_grp); p1_micro <- out(p1_micro)
+      #   p2_con <- out(p2_con); p2_grp <- out(p2_grp); p2_micro <- out(p2_micro)
+      
+    # Load files for compass 
+      master_p1_constraints <- read.csv(p1_con, check.names = FALSE)
+      master_p1_groups      <- read.csv(p1_grp, check.names = FALSE)
+      master_p1_microdata   <- p1_micro
+
+      master_p2_constraints <- read.csv(p2_con, check.names = FALSE)
+      master_p2_groups      <- read.csv(p2_grp, check.names = FALSE)
+      master_p2_microdata   <- p2_micro
+
+    # Set up LSOAs
+    lsoa_col <- "LSOA21CD"
+
+    common_lsoas <- intersect(master_p1_constraints[[lsoa_col]], master_p2_constraints[[lsoa_col]])
+    common_lsoas <- common_lsoas[startsWith(common_lsoas, "E")]
+    cat("Running full England set: ", length(common_lsoas), " common LSOAs across P1 and P2.\n", sep="")
+
+    # Diagnostics: run on a fixed sample of LSOAs
+      test_mode <- FALSE                    # set to FALSE for the full run of all LSOAs
+      test_n    <- 1000                    # how many LSOAs to sample
+      test_list <- "test_lsoas_1000.txt"   # saved in the main compass folder
+
+      if (test_mode) {
+        if (file.exists(test_list)) {
+          common_lsoas <- readLines(test_list)
+        } else {
+          common_lsoas <- sample(common_lsoas, test_n)
+          writeLines(common_lsoas, test_list)
+        }
+        if (length(common_lsoas) != test_n) stop("Test list has ", length(common_lsoas), " LSOAs, expected ", test_n)
+        cat("TEST MODE: using ", length(common_lsoas), " LSOAs from ", test_list, "\n", sep="")
+      }
+      
+    # restrict both to the common LSOA set, so P1/P2 stay aligned
+    p1_full <- master_p1_constraints[master_p1_constraints[[lsoa_col]] %in% common_lsoas, , drop=FALSE]
+    p2_full <- master_p2_constraints[master_p2_constraints[[lsoa_col]] %in% common_lsoas, , drop=FALSE]
+
+# STEP 2 - Full pipeline
+    # 2.1 wrap multirun chunk, to multi-run :) 
+      run_compass_pipeline <- function(
+          p1_constraints, p1_groups, p1_microdata,
+          p2_constraints, p2_groups, p2_microdata,
+          results_dir, n,
+          start_run = 1, restart = TRUE, restart_from = NULL, save_every = 1
+      ) {
+
+        state_file <- file.path(results_dir, "analysis_state.RData")
+
+        dir.create(results_dir, showWarnings=FALSE)
+        dir.create(file.path(results_dir, "checkpoints"), recursive=TRUE, showWarnings=FALSE)
+        dir.create(file.path(results_dir, "logs"), recursive=TRUE, showWarnings=FALSE)
+
+        other_vars <- c("hh_urban_rural", "hh_heating", "hh_type", "ind_education", "ind_ethnicity", "ind_health")
+
+    # 2.2 define input files 
+      p1_con <- file.path(results_dir, "p1_constraints_full.csv")
+      p1_grp <- file.path(results_dir, "p1_groups_full.csv")
+      p2_con <- file.path(results_dir, "p2_constraints_full.csv")
+      p2_grp <- file.path(results_dir, "p2_groups_full.csv")
+
+      write.csv(p1_constraints, p1_con, row.names=FALSE)
+      write.csv(p1_groups, p1_grp, row.names=FALSE)
+      write.csv(p2_constraints, p2_con, row.names=FALSE)
+      write.csv(p2_groups, p2_grp, row.names=FALSE)
+
+    # 2.3 check headers
+      get_micro_headers <- function(file) names(read.csv(file, nrows=1, check.names=FALSE))
+      check_headers <- function(con, grp, micro, label, id_cols = c("LSOA21CD", "population")) {
+
+        con_h <- setdiff(names(con), id_cols)
+        grp_h <- grp$heading
+        micro_h <- setdiff(micro, "hidp")
+
+        cat("\n", label, " INPUT CHECK\n", sep="")
+        cat("========================================\n")
+        cat("Constraints: ", length(con_h), "\n", sep="")
+        cat("Groups: ", length(grp_h), "\n", sep="")
+        cat("Microdata variables: ", length(micro_h), "\n", sep="")
+
+        missing_grp <- setdiff(con_h, grp_h)
+        extra_grp <- setdiff(grp_h, con_h)
+        missing_micro <- setdiff(con_h, micro_h)
+        extra_micro <- setdiff(micro_h, con_h)
+
+        if(length(missing_grp)>0) {
+          cat("\nConstraints missing from groups:\n")
+          print(missing_grp)
+          stop(label, " constraints/groups mismatch")
+        }
+
+        if(length(extra_grp)>0) {
+          cat("\nGroups not present in constraints:\n")
+          print(extra_grp)
+          stop(label, " groups/constraints mismatch")
+        }
+
+        if(length(missing_micro)>0) {
+          cat("\nConstraints missing from microdata:\n")
+          print(missing_micro)
+          stop(label, " microdata/constraints mismatch")
+        }
+
+        if(length(extra_micro)>0) {
+          cat("\nIgnoring microdata-only variables:\n")
+          print(extra_micro)
+        }
+
+        cat("\n", label, " header SETS OK\n", sep="")
+
+    # 2.4 enforce colunmn order 
+      # Target order: id columns first (in their existing order), then
+      # constraint/microdata variables in the order the MICRODATA declares them
+      # (microdata is the more constrained/authoritative source here, since it's
+      # what actually gets read row-by-row by the household lookup logic).
+      target_var_order <- micro_h[micro_h %in% con_h]
+      current_var_order <- names(con)[names(con) %in% con_h]
+      order_matches <- identical(current_var_order, target_var_order)
+
+      if (!order_matches) {
+
+        first_mismatch <- which(current_var_order != target_var_order)[1]
+
+        cat("\n", label, " COLUMN ORDER MISMATCH detected.\n", sep="")
+        cat("First divergence at position ", first_mismatch, ":\n", sep="")
+        cat("  constraints has:  ", current_var_order[first_mismatch], "\n", sep="")
+        cat("  microdata has:    ", target_var_order[first_mismatch], "\n", sep="")
+        cat("Reordering constraints columns to match microdata order...\n")
+
+        con <- data.table::setcolorder(
+          data.table::copy(data.table::as.data.table(con)),
+          neworder = c(id_cols[id_cols %in% names(con)], target_var_order)
+        )
+        con <- as.data.frame(con)
+
+        # Re-verify after reordering 
+        reordered_var_order <- names(con)[names(con) %in% con_h]
+        if (!identical(reordered_var_order, target_var_order)) {
+          stop(label, ": column reordering failed to align constraints with microdata. ",
+              "Check for duplicate column names or unexpected id_cols.")
+        }
+
+        cat(label, " columns reordered to match microdata. Order now OK.\n", sep="")
+
+      } else {
+        cat(label, " column ORDER already matches microdata. OK.\n", sep="")
+      }
+
+      # write/use the corrected version, not the original.
+      invisible(con)
+      }
+
+      p1_micro_headers <- get_micro_headers(p1_microdata)
+      p2_micro_headers <- get_micro_headers(p2_microdata)
+
+      p1_constraints <- check_headers(p1_constraints, p1_groups, p1_micro_headers, "P1")
+      p2_constraints <- check_headers(p2_constraints, p2_groups, p2_micro_headers, "P2")
+
+      write.csv(p1_constraints, p1_con, row.names=FALSE)
+      write.csv(p2_constraints, p2_con, row.names=FALSE)
+
+    # 2.5 Microdata/lookup matrix set up
+      p1_micro_df <- read.csv(p1_microdata, check.names=FALSE)
+      p2_micro_df <- read.csv(p2_microdata, check.names=FALSE)
+
+      if(sum(duplicated(p1_micro_df$hidp))>0) stop("Duplicate hidp values in P1 microdata.")
+      if(sum(duplicated(p2_micro_df$hidp))>0) stop("Duplicate hidp values in P2 microdata.")
+
+      age_bands <- c("00_15", "16_24", "25_34", "35_49", "50_64", "65p")
+      sex_bands <- c("f", "m")
+
+      dis_cols <- names(p1_micro_df)[grepl("^ind_sex_age_dis%", names(p1_micro_df))]
+      dis1_cols <- dis_cols[grepl("_dis1$", dis_cols)]
+      dis0_cols <- dis_cols[grepl("_dis0$", dis_cols)]
+
+      hh_level_prefixes <- c("hh_urban_rural", "hh_heating", "hh_type")
+      hh_level_cols <- names(p1_micro_df)[sapply(strsplit(names(p1_micro_df), "%"), function(x) x[1]) %in% hh_level_prefixes]
+
+      needed_cols <- c(dis1_cols, dis0_cols, hh_level_cols)
+
+      p1_lookup_mat <- as.matrix(p1_micro_df[, needed_cols, drop=FALSE])
+      p2_lookup_mat <- as.matrix(p2_micro_df[, needed_cols, drop=FALSE])
+
+      rownames(p1_lookup_mat) <- as.character(p1_micro_df$hidp)
+      rownames(p2_lookup_mat) <- as.character(p2_micro_df$hidp)
+
+    # 2.6 define helper functions (CIs and prevalence)
+      prevalence_weighted <- function(mat, idx, counts, dis1_cols_sub, dis0_cols_sub) {
+        if(length(idx)==0 || length(c(dis1_cols_sub, dis0_cols_sub))==0) {
+          return(data.frame(dis1_count=0, pop_count=0, prevalence=NA_real_))
+        }
+        cols <- c(dis1_cols_sub, dis0_cols_sub)
+        sub <- mat[idx, cols, drop=FALSE] * counts
+        dis1_n <- sum(sub[, dis1_cols_sub, drop=FALSE], na.rm=TRUE)
+        pop_n <- sum(sub, na.rm=TRUE)
+        data.frame(dis1_count=dis1_n, pop_count=pop_n, prevalence=ifelse(pop_n>0, dis1_n/pop_n, NA_real_))
+      }
+
+      ci_from_runs <- function(x) {
+        x <- x[!is.na(x)]
+        if(length(x)<2) return(c(ci_low=NA_real_, ci_high=NA_real_))
+        q <- quantile(x, c(0.025, 0.975), na.rm=TRUE)
+        c(ci_low=unname(q[1]), ci_high=unname(q[2]))
+      }
+
+      census_prevalence <- function(constraints_df, dis1_cols_sub, dis0_cols_sub) {
+        dis1_cols_sub <- intersect(dis1_cols_sub, names(constraints_df))
+        dis0_cols_sub <- intersect(dis0_cols_sub, names(constraints_df))
+        if(length(dis1_cols_sub)==0 || length(dis0_cols_sub)==0) {
+          return(data.frame(dis1_count=NA_real_, pop_count=NA_real_, prevalence=NA_real_))
+        }
+        dis1_n <- sum(as.matrix(constraints_df[, dis1_cols_sub, drop=FALSE]), na.rm=TRUE)
+        dis0_n <- sum(as.matrix(constraints_df[, dis0_cols_sub, drop=FALSE]), na.rm=TRUE)
+        pop_n <- dis1_n + dis0_n
+        data.frame(dis1_count=dis1_n, pop_count=pop_n, prevalence=ifelse(pop_n>0, dis1_n/pop_n, NA_real_))
+      }
+
+    # 2.7 census ground truth set up 
+      p1_census_stat <- census_prevalence(p1_constraints, dis1_cols, dis0_cols)
+      p2_census_stat <- census_prevalence(p2_constraints, dis1_cols, dis0_cols)
+
+      write.csv(
+        data.frame(census_p1_prevalence=p1_census_stat$prevalence, census_p2_target_prevalence=p2_census_stat$prevalence),
+        file.path(results_dir, "census_disability_marginal.csv"), row.names=FALSE
+      )
+
+      census_sex_dis <- list()
+      for(s in sex_bands) {
+        d1 <- names(p1_constraints)[grepl(paste0("^ind_sex_age_dis%", s, "_.*_dis1$"), names(p1_constraints))]
+        d0 <- names(p1_constraints)[grepl(paste0("^ind_sex_age_dis%", s, "_.*_dis0$"), names(p1_constraints))]
+        p1_stat <- census_prevalence(p1_constraints, d1, d0)
+        p2_stat <- census_prevalence(p2_constraints, d1, d0)
+        census_sex_dis[[s]] <- data.frame(category=s, census_prevalence=p1_stat$prevalence, p2_target_prevalence=p2_stat$prevalence)
+      }
+      census_sex_dis <- do.call(rbind, census_sex_dis)
+      write.csv(census_sex_dis, file.path(results_dir, "census_sex_x_disability.csv"), row.names=FALSE)
+
+      census_age_dis <- list()
+      for(a in age_bands) {
+        d1 <- names(p1_constraints)[grepl(paste0("^ind_sex_age_dis%.*_", a, "_dis1$"), names(p1_constraints))]
+        d0 <- names(p1_constraints)[grepl(paste0("^ind_sex_age_dis%.*_", a, "_dis0$"), names(p1_constraints))]
+        p1_stat <- census_prevalence(p1_constraints, d1, d0)
+        p2_stat <- census_prevalence(p2_constraints, d1, d0)
+        census_age_dis[[a]] <- data.frame(category=a, census_prevalence=p1_stat$prevalence, p2_target_prevalence=p2_stat$prevalence)
+      }
+      census_age_dis <- do.call(rbind, census_age_dis)
+      write.csv(census_age_dis, file.path(results_dir, "census_age_x_disability.csv"), row.names=FALSE)
+
+    # 2.8 accumulators set up 
+      variable_results <- list()
+      l1_sex_dis_results <- list()
+      l1_age_dis_results <- list()
+      l1_dis_marginal_results <- list()
+      l1_dis_hh_results <- list()
+      l2_worst100_results <- list()
+      global_fit_results <- list()
+      timing <- list()
+
+    # 2.9 COMPASS function
+      run_compass <- function(constraints, microdata, groups, output, validate, seed, log_file, defs = l_definitions) {
+        payload <- list(
+          constraints = constraints, microdata = microdata, groups = groups,
+          output = output, validate = validate,
+          initialTemp      = defs$initialTemp,
+          minTemp          = defs$minTemp,
+          coolingRate      = defs$coolingRate,
+          reheatFactor     = defs$reheatFactor,
+          fitnessThreshold = defs$fitnessThreshold,
+          # minImprovement   = defs$minImprovement,
+          maxIterations    = defs$maxIterations,
+          windowSize       = defs$windowSize,
+          change           = defs$change,
+          distance         = defs$distance,
+          useRandomSeed    = defs$useRandomSeed,
+          randomSeed       = seed
+        )
+        out <- system2(defs$path_compass, input = toJSON(payload, auto_unbox = TRUE, digits = NA), stdout = TRUE, stderr = TRUE)
+        writeLines(out, log_file)
+        if (!file.exists(output) || !file.exists(validate)) stop("Compass failed. See: ", log_file)
+        invisible(out)
+      }
+
+      extract_marginal <- function(x) {
+        required <- c("geography_code", "variable", "synth_fraction")
+        if(!all(required %in% names(x))) stop("Validation file does not contain expected columns.")
+        out <- x[, required, drop=FALSE]
+        out$constraint_fraction <- if("constraint_fraction" %in% names(x)) x$constraint_fraction else NA_real_
+        out
+      }
+
+    # 2.10 restart state
+      if(restart && is.null(restart_from) && file.exists(state_file)) {
+        load(state_file)
+        start_run <- last_completed_run + 1
+      } else {
+        start_run <- if(!is.null(restart_from)) restart_from else start_run
+        last_completed_run <- start_run - 1
+      }
+
+    # 2.11 run main loop 
+      for(i in start_run:n) {
+
+        cat("\n[", basename(results_dir), "] RUN ", i, " OF ", n, "\n", sep="")
+
+        seed <- 1000 + i
+        run_start <- Sys.time()
+        id <- sprintf("%03d", i)
+
+        p1_pop <- file.path(results_dir, paste0("p1_pop_run", id, ".csv"))
+        p1_val <- file.path(results_dir, paste0("p1_validate_run", id, ".csv"))
+        t1 <- Sys.time()
+        run_compass(p1_con, p1_microdata, p1_grp, p1_pop, p1_val, seed, file.path(results_dir, "logs", paste0("P1_run", id, ".log")))
+        p1_time <- as.numeric(difftime(Sys.time(), t1, units="secs"))
+
+        p2_pop <- file.path(results_dir, paste0("p2_pop_run", id, ".csv"))
+        p2_val <- file.path(results_dir, paste0("p2_validate_run", id, ".csv"))
+        t2 <- Sys.time()
+        run_compass(p2_con, p2_microdata, p2_grp, p2_pop, p2_val, seed, file.path(results_dir, "logs", paste0("P2_run", id, ".log")))
+        p2_time <- as.numeric(difftime(Sys.time(), t2, units="secs"))
+
+        p1 <- read.csv(p1_val, check.names=FALSE)
+        p2 <- read.csv(p2_val, check.names=FALSE)
+        p1_m <- extract_marginal(p1); p1_m$match_variable <- p1_m$variable
+        p2_m <- extract_marginal(p2); p2_m$match_variable <- p2_m$variable
+
+        m <- merge(p1_m, p2_m, by=c("geography_code", "match_variable"), suffixes=c("_p1", "_p2"))
+        if(nrow(m)==0) stop("No matching marginal variables in run ", i)
+
+        m$p2_minus_p1 <- m$synth_fraction_p2 - m$synth_fraction_p1
+        m$p2_minus_p1_abs <- abs(m$p2_minus_p1)
+        m$p2_minus_p1_squared <- m$p2_minus_p1^2
+        m$p1_minus_census <- m$synth_fraction_p1 - m$constraint_fraction_p1
+        m$p1_minus_census_abs <- abs(m$p1_minus_census)
+        m$p1_minus_census_squared <- m$p1_minus_census^2
+        m$p2_minus_census <- m$synth_fraction_p2 - m$constraint_fraction_p1
+        m$p2_minus_census_abs <- abs(m$p2_minus_census)
+        m$p2_minus_census_squared <- m$p2_minus_census^2
+
+        global_fit_results[[i]] <- data.frame(
+          run=i, n_cells=nrow(m),
+          mean_p2_minus_p1_abs=mean(m$p2_minus_p1_abs, na.rm=TRUE),
+          mean_p2_minus_p1_squared=mean(m$p2_minus_p1_squared, na.rm=TRUE),
+          mean_p1_census_abs=mean(m$p1_minus_census_abs, na.rm=TRUE),
+          mean_p1_census_squared=mean(m$p1_minus_census_squared, na.rm=TRUE),
+          mean_p2_census_abs=mean(m$p2_minus_census_abs, na.rm=TRUE),
+          mean_p2_census_squared=mean(m$p2_minus_census_squared, na.rm=TRUE)
+        )
+
+        v <- aggregate(
+          cbind(p2_minus_p1_abs, p2_minus_p1_squared, p1_minus_census_abs, p1_minus_census_squared,
+                p2_minus_census_abs, p2_minus_census_squared) ~ variable_p1,
+          data=m, FUN=function(x) c(sum=sum(x, na.rm=TRUE), n=sum(!is.na(x)))
+        )
+        v <- do.call(data.frame, v)
+        names(v) <- gsub("\\.sum$", "_sum", names(v))
+        names(v) <- gsub("\\.n$", "_n", names(v))
+        names(v)[names(v)=="variable_p1"] <- "variable"
+        v$run <- i
+        variable_results[[i]] <- v
+
+        p1_ids <- fread(p1_pop, select="microdata_id")[[1]]
+        p2_ids <- fread(p2_pop, select="microdata_id")[[1]]
+        p1_freq <- table(as.character(p1_ids))
+        p2_freq <- table(as.character(p2_ids))
+        idx1 <- match(names(p1_freq), rownames(p1_lookup_mat))
+        idx2 <- match(names(p2_freq), rownames(p2_lookup_mat))
+        if(any(is.na(idx1))) stop("Some P1 population microdata_id values not found in microdata (run ", i, ")")
+        if(any(is.na(idx2))) stop("Some P2 population microdata_id values not found in microdata (run ", i, ")")
+        counts1 <- as.numeric(p1_freq)
+        counts2 <- as.numeric(p2_freq)
+
+        sex_dis_run <- list()
+        for(s in sex_bands) {
+          d1 <- names(p1_micro_df)[grepl(paste0("^ind_sex_age_dis%", s, "_.*_dis1$"), names(p1_micro_df))]
+          d0 <- names(p1_micro_df)[grepl(paste0("^ind_sex_age_dis%", s, "_.*_dis0$"), names(p1_micro_df))]
+          p1_stat <- prevalence_weighted(p1_lookup_mat, idx1, counts1, d1, d0)
+          p2_stat <- prevalence_weighted(p2_lookup_mat, idx2, counts2, d1, d0)
+          census_row <- census_sex_dis[census_sex_dis$category==s, , drop=FALSE]
+          census_prev <- if(nrow(census_row)>0) census_row$census_prevalence[1] else NA_real_
+          sex_dis_run[[s]] <- data.frame(
+            run=i, category=s, census_prevalence=census_prev,
+            p1_prevalence=p1_stat$prevalence, p2_prevalence=p2_stat$prevalence,
+            p1_minus_census=p1_stat$prevalence-census_prev, p2_minus_census=p2_stat$prevalence-census_prev,
+            p2_minus_p1=p2_stat$prevalence-p1_stat$prevalence
+          )
+        }
+        l1_sex_dis_results[[i]] <- do.call(rbind, sex_dis_run)
+
+        age_dis_run <- list()
+        for(a in age_bands) {
+          d1 <- names(p1_micro_df)[grepl(paste0("^ind_sex_age_dis%.*_", a, "_dis1$"), names(p1_micro_df))]
+          d0 <- names(p1_micro_df)[grepl(paste0("^ind_sex_age_dis%.*_", a, "_dis0$"), names(p1_micro_df))]
+          p1_stat <- prevalence_weighted(p1_lookup_mat, idx1, counts1, d1, d0)
+          p2_stat <- prevalence_weighted(p2_lookup_mat, idx2, counts2, d1, d0)
+          census_row <- census_age_dis[census_age_dis$category==a, , drop=FALSE]
+          census_prev <- if(nrow(census_row)>0) census_row$census_prevalence[1] else NA_real_
+          age_dis_run[[a]] <- data.frame(
+            run=i, category=a, census_prevalence=census_prev,
+            p1_prevalence=p1_stat$prevalence, p2_prevalence=p2_stat$prevalence,
+            p1_minus_census=p1_stat$prevalence-census_prev, p2_minus_census=p2_stat$prevalence-census_prev,
+            p2_minus_p1=p2_stat$prevalence-p1_stat$prevalence
+          )
+        }
+        l1_age_dis_results[[i]] <- do.call(rbind, age_dis_run)
+
+        p1_stat <- prevalence_weighted(p1_lookup_mat, idx1, counts1, dis1_cols, dis0_cols)
+        p2_stat <- prevalence_weighted(p2_lookup_mat, idx2, counts2, dis1_cols, dis0_cols)
+        census_prev <- p1_census_stat$prevalence
+        l1_dis_marginal_results[[i]] <- data.frame(
+          run=i, census_prevalence=census_prev,
+          p1_prevalence=p1_stat$prevalence, p2_prevalence=p2_stat$prevalence,
+          p1_minus_census=p1_stat$prevalence-census_prev, p2_minus_census=p2_stat$prevalence-census_prev,
+          p2_minus_p1=p2_stat$prevalence-p1_stat$prevalence
+        )
+
+        hh_dis_run <- list()
+        for(pfx in hh_level_prefixes) {
+          cats <- hh_level_cols[grepl(paste0("^", pfx, "%"), hh_level_cols)]
+          for(col_name in cats) {
+            cat_label <- sub("^.*%", "", col_name)
+            mask1 <- p1_lookup_mat[idx1, col_name]==1
+            mask2 <- p2_lookup_mat[idx2, col_name]==1
+            p1_stat <- prevalence_weighted(p1_lookup_mat, idx1[mask1], counts1[mask1], dis1_cols, dis0_cols)
+            p2_stat <- prevalence_weighted(p2_lookup_mat, idx2[mask2], counts2[mask2], dis1_cols, dis0_cols)
+            hh_dis_run[[col_name]] <- data.frame(
+              run=i, variable=pfx, category=cat_label, census_prevalence=NA_real_,
+              p1_prevalence=p1_stat$prevalence, p2_prevalence=p2_stat$prevalence,
+              p1_minus_census=NA_real_, p2_minus_census=NA_real_,
+              p2_minus_p1=p2_stat$prevalence-p1_stat$prevalence
+            )
+          }
+        }
+        l1_dis_hh_results[[i]] <- do.call(rbind, hh_dis_run)
+
+        l2_base <- m[!is.na(m$p1_minus_census_squared), , drop=FALSE]
+        if(nrow(l2_base)==0) stop("No P1-vs-census values available for LSOA ranking in run ", i)
+        p1_lsoa_score <- aggregate(p1_minus_census_squared ~ geography_code, data=l2_base, FUN=sum, na.rm=TRUE)
+        names(p1_lsoa_score)[2] <- "p1_census_squared_error_sum"
+        p1_lsoa_score <- p1_lsoa_score[order(-p1_lsoa_score$p1_census_squared_error_sum), , drop=FALSE]
+        p1_lsoa_score <- p1_lsoa_score[seq_len(min(100, nrow(p1_lsoa_score))), , drop=FALSE]
+        p1_lsoa_score$p1_rank <- seq_len(nrow(p1_lsoa_score))
+        worst_codes <- p1_lsoa_score$geography_code
+
+        p1_detail <- l2_base[l2_base$geography_code %in% worst_codes,
+          c("geography_code","variable_p1","synth_fraction_p1","p1_minus_census","p1_minus_census_abs","p1_minus_census_squared"), drop=FALSE]
+        p2_detail <- m[m$geography_code %in% worst_codes,
+          c("geography_code","variable_p1","synth_fraction_p2","p2_minus_census","p2_minus_census_abs","p2_minus_census_squared","p2_minus_p1","p2_minus_p1_abs","p2_minus_p1_squared"), drop=FALSE]
+
+        p1_summary <- aggregate(cbind(p1_minus_census_abs, p1_minus_census_squared) ~ geography_code, data=p1_detail, FUN=sum, na.rm=TRUE)
+        names(p1_summary)[2:3] <- c("p1_census_abs_error_sum", "p1_census_squared_error_sum")
+        p2_summary <- aggregate(cbind(p2_minus_census_abs, p2_minus_census_squared, p2_minus_p1_abs, p2_minus_p1_squared) ~ geography_code, data=p2_detail, FUN=sum, na.rm=TRUE)
+        names(p2_summary)[2:5] <- c("p2_census_abs_error_sum","p2_census_squared_error_sum","p2_p1_abs_error_sum","p2_p1_squared_error_sum")
+
+        p1_top <- p1_detail[order(p1_detail$geography_code, -p1_detail$p1_minus_census_squared), c("geography_code","variable_p1","p1_minus_census"), drop=FALSE]
+        p1_top$rank <- ave(seq_len(nrow(p1_top)), p1_top$geography_code, FUN=seq_along)
+        p1_top <- p1_top[p1_top$rank<=5, , drop=FALSE]
+        p1_top_wide <- dcast(as.data.table(p1_top), geography_code ~ rank, value.var=c("variable_p1","p1_minus_census"))
+        setnames(p1_top_wide, old=names(p1_top_wide)[-1], new=c(paste0("p1_top",1:5,"_variable"), paste0("p1_top",1:5,"_error")), skip_absent=TRUE)
+
+        p2_top <- p2_detail[order(p2_detail$geography_code, -p2_detail$p2_minus_census_squared), c("geography_code","variable_p1","p2_minus_census"), drop=FALSE]
+        p2_top$rank <- ave(seq_len(nrow(p2_top)), p2_top$geography_code, FUN=seq_along)
+        p2_top <- p2_top[p2_top$rank<=5, , drop=FALSE]
+        p2_top_wide <- dcast(as.data.table(p2_top), geography_code ~ rank, value.var=c("variable_p1","p2_minus_census"))
+        setnames(p2_top_wide, old=names(p2_top_wide)[-1], new=c(paste0("p2_top",1:5,"_variable"), paste0("p2_top",1:5,"_error")), skip_absent=TRUE)
+
+        l2_run <- merge(p1_lsoa_score, p1_summary, by="geography_code", all.x=TRUE)
+        l2_run <- merge(l2_run, p2_summary, by="geography_code", all.x=TRUE)
+        l2_run <- merge(l2_run, p1_top_wide, by="geography_code", all.x=TRUE)
+        l2_run <- merge(l2_run, p2_top_wide, by="geography_code", all.x=TRUE)
+        l2_run$run <- i
+        l2_run <- l2_run[order(l2_run$run, l2_run$p1_rank), , drop=FALSE]
+        l2_worst100_results[[i]] <- l2_run
+
+        total_seconds <- as.numeric(difftime(Sys.time(), run_start, units="secs"))
+        timing[[i]] <- data.frame(run=i, seed=seed, p1_seconds=p1_time, p2_seconds=p2_time, total_seconds=total_seconds)
+
+        last_completed_run <- i
+        save(variable_results, l1_sex_dis_results, l1_age_dis_results, l1_dis_marginal_results,
+            l1_dis_hh_results, l2_worst100_results, global_fit_results, timing, last_completed_run,
+            file=state_file)
+        writeLines(as.character(last_completed_run), file.path(results_dir, "last_completed_run.txt"))
+
+        if(i %% save_every==0 || i==n) {
+          checkpoint <- file.path(results_dir, "checkpoints", paste0("run_", id))
+          dir.create(checkpoint, showWarnings=FALSE)
+          file.copy(p1_pop, checkpoint, overwrite=TRUE)
+          file.copy(p1_val, checkpoint, overwrite=TRUE)
+          file.copy(p2_pop, checkpoint, overwrite=TRUE)
+          file.copy(p2_val, checkpoint, overwrite=TRUE)
+        } else {
+          file.remove(p1_pop, p1_val, p2_pop, p2_val)
+        }
+
+        rm(p1, p2, p1_m, p2_m, m, p1_ids, p2_ids, p1_freq, p2_freq, idx1, idx2, counts1, counts2,
+          sex_dis_run, age_dis_run, hh_dis_run, p1_stat, p2_stat)
+        gc()
+      }
+
+    # 2.12 aggregate post-loop
+      sex_dis_all <- do.call(rbind, l1_sex_dis_results)
+      age_dis_all <- do.call(rbind, l1_age_dis_results)
+      dis_marg_all <- do.call(rbind, l1_dis_marginal_results)
+      hh_dis_all <- do.call(rbind, l1_dis_hh_results)
+
+      write.csv(sex_dis_all, file.path(results_dir, "l1_sex_x_disability_by_run.csv"), row.names=FALSE)
+      write.csv(age_dis_all, file.path(results_dir, "l1_age_x_disability_by_run.csv"), row.names=FALSE)
+      write.csv(dis_marg_all, file.path(results_dir, "l1_disability_marginal_by_run.csv"), row.names=FALSE)
+      write.csv(hh_dis_all, file.path(results_dir, "l1_disability_x_household_by_run.csv"), row.names=FALSE)
+
+      dis_marg_avg <- data.frame(
+        census_prevalence=mean(dis_marg_all$census_prevalence, na.rm=TRUE),
+        p1_prevalence=mean(dis_marg_all$p1_prevalence, na.rm=TRUE),
+        p2_prevalence=mean(dis_marg_all$p2_prevalence, na.rm=TRUE),
+        p1_minus_census=mean(dis_marg_all$p1_minus_census, na.rm=TRUE),
+        p2_minus_census=mean(dis_marg_all$p2_minus_census, na.rm=TRUE),
+        p2_minus_p1=mean(dis_marg_all$p2_minus_p1, na.rm=TRUE)
+      )
+      p1_ci <- ci_from_runs(dis_marg_all$p1_prevalence)
+      p2_ci <- ci_from_runs(dis_marg_all$p2_prevalence)
+      dis_marg_avg$p1_ci_low <- p1_ci[1]; dis_marg_avg$p1_ci_high <- p1_ci[2]
+      dis_marg_avg$p2_ci_low <- p2_ci[1]; dis_marg_avg$p2_ci_high <- p2_ci[2]
+      write.csv(dis_marg_avg, file.path(results_dir, "l1_disability_marginal_avg.csv"), row.names=FALSE)
+
+      global_fit_all <- do.call(rbind, global_fit_results)
+      fwrite(global_fit_all, file.path(results_dir, "global_fit_by_run.csv"))
+
+      global_fit_metrics <- c("mean_p2_minus_p1_abs","mean_p2_minus_p1_squared","mean_p1_census_abs",
+                              "mean_p1_census_squared","mean_p2_census_abs","mean_p2_census_squared")
+      global_fit_summary <- do.call(rbind, lapply(global_fit_metrics, function(metric) {
+        x <- global_fit_all[[metric]]
+        ci <- ci_from_runs(x)
+        data.frame(metric=metric, mean_across_runs=mean(x, na.rm=TRUE), ci_low=ci[1], ci_high=ci[2], n_runs=sum(!is.na(x)))
+      }))
+      rownames(global_fit_summary) <- NULL
+      write.csv(global_fit_summary, file.path(results_dir, "global_fit_summary.csv"), row.names=FALSE)
+
+      timing_all <- do.call(rbind, timing)
+      write.csv(timing_all, file.path(results_dir, "timing_by_run.csv"), row.names=FALSE)
+
+      cat("\n[", basename(results_dir), "] COMPLETE — ", n, " runs.\n", sep="")
+
+      invisible(list(dis_marg_avg = dis_marg_avg, global_fit_summary = global_fit_summary))
+      }
+
+# STEP 3 - Run for full England - set n_runs/n_populations here 
+    n_stochastic_runs <- 10
+    null_mode <- FALSE     # TRUE = disability constraint only; FALSE = all constraints
+
+    # experiment settings for this run
+    l_definitions$distance    <- "COSINE"   
+    l_definitions$coolingRate <- 0.99995            # 0.99995 is usual speed
+    run_tag <- "cosine_10" # level of results (full) and length of LSOA runs (test) already in name tag
+
+    # folder name reflects the switches and tag
+    results_dir <- paste0("results_",
+                          if (null_mode) "null" else "full",
+                          if (test_mode) "_test" else "",
+                          if (nzchar(run_tag)) paste0("_", run_tag) else "")
+    dir.create(results_dir, showWarnings = FALSE)
+
+    # choose inputs
+      if (null_mode) {
+        keep <- grep("^ind_sex_age_dis%", names(p1_full), value = TRUE)
+        ids  <- intersect(c("LSOA21CD", "population"), names(p1_full))
+        run_p1_con <- p1_full[, c(ids, keep)]
+        run_p2_con <- p2_full[, c(ids, keep)]
+        run_p1_grp <- master_p1_groups[master_p1_groups$heading %in% keep, ]
+        run_p2_grp <- master_p2_groups[master_p2_groups$heading %in% keep, ]
+
+        # trimmed microdata: household id + disability columns only
+        trim_micro <- function(in_file, out_file) {
+          dt <- fread(in_file, select = c("hidp", keep), colClasses = list(character = "hidp"))
+          fwrite(dt, out_file, quote = FALSE)
+          out_file
+        }
+        run_p1_micro <- trim_micro(master_p1_microdata, file.path(results_dir, "p1_microdata_null.csv"))
+        run_p2_micro <- trim_micro(master_p2_microdata, file.path(results_dir, "p2_microdata_null.csv"))
+      } else {
+        run_p1_con <- p1_full
+        run_p2_con <- p2_full
+        run_p1_grp <- master_p1_groups
+        run_p2_grp <- master_p2_groups
+        run_p1_micro <- master_p1_microdata
+        run_p2_micro <- master_p2_microdata
+      }
+
+    # merge the four sex x disability groups into one joint group
+      merge_dis_groups <- TRUE
+
+      if (merge_dis_groups) {
+        merge_dis <- function(g) {
+          i <- grepl("^ind_sex_age_dis%", g$heading)
+          g$group[i] <- min(g$group[i])
+          g
+        }
+        run_p1_grp <- merge_dis(run_p1_grp)
+        run_p2_grp <- merge_dis(run_p2_grp)
+      }
+
+    # print
+    cat("\n========================================\n")
+    cat("STARTING RUN — ", if (null_mode) "NULL MODEL" else "ALL CONSTRAINTS",
+        if (test_mode) " (TEST SAMPLE)" else "", " — ",
+        length(common_lsoas), " LSOAs, ", n_stochastic_runs, " populations\n", sep="")
+    cat("========================================\n")
+
+    # record which LSOAs were sampled in test mode
+    if (test_mode) {
+      dir.create(results_dir, showWarnings = FALSE)
+      writeLines(common_lsoas, file.path(results_dir, "test_lsoas.txt"))
+    }
+
+    if (test_mode && length(common_lsoas) != test_n) stop("Not a test-sized LSOA set; refusing to run.")
+    
+    results <- run_compass_pipeline(
+      p1_constraints = run_p1_con, p1_groups = run_p1_grp, p1_microdata = run_p1_micro,
+      p2_constraints = run_p2_con, p2_groups = run_p2_grp, p2_microdata = run_p2_micro,
+      results_dir = results_dir,
+      n = n_stochastic_runs,
+      restart = FALSE
+    )
+
+    cat("\nRUN COMPLETE.\n")
+    cat("Results in: ", results_dir, "\n", sep="")
+
+    # print(results$dis_marg_avg)
+    write.csv(results$dis_marg_avg, file.path(results_dir, "disability_marginal_summary.csv"), row.names=FALSE)
+
+    # Average constraints 
+      ci_from_runs <- function(x) {
+        x <- x[!is.na(x)]
+        if (length(x) < 2) return(c(ci_low = NA_real_, ci_high = NA_real_))
+        q <- quantile(x, c(0.025, 0.975), na.rm = TRUE)
+        c(ci_low = unname(q[1]), ci_high = unname(q[2]))
+      }
+
+      summarise_col <- function(x) {
+        ci <- ci_from_runs(x)
+        list(mean = mean(x, na.rm = TRUE), ci_low = ci["ci_low"], ci_high = ci["ci_high"])
+      }
+
+      average_by_run <- function(in_file, out_file, by_cols) {
+        dt <- fread(file.path(results_dir, in_file))
+
+        avg <- dt[, {
+          p1 <- summarise_col(p1_prevalence)
+          p2 <- summarise_col(p2_prevalence)
+          gap <- summarise_col(p2_minus_p1)
+          .(
+            n_runs           = .N,
+            p1_prevalence    = p1$mean, p1_ci_low = p1$ci_low, p1_ci_high = p1$ci_high,
+            p2_prevalence    = p2$mean, p2_ci_low = p2$ci_low, p2_ci_high = p2$ci_high,
+            p2_minus_p1      = gap$mean, p2_minus_p1_ci_low = gap$ci_low, p2_minus_p1_ci_high = gap$ci_high
+          )
+        }, by = by_cols]
+
+        setorderv(avg, by_cols)
+        # print(avg)
+        fwrite(avg, file.path(results_dir, out_file))
+        invisible(avg)
+      }
+
+      # Individuals 
+        # Age 
+          average_by_run("l1_age_x_disability_by_run.csv", "l1_disability_x_ind_age_avg.csv", "category")
+        # Sex 
+          average_by_run("l1_sex_x_disability_by_run.csv", "l1_disability_x_ind_sex_avg.csv", "category")
+      # Household (skips if in null mode)
+        if (!null_mode) {
+          average_by_run("l1_disability_x_household_by_run.csv", "l1_disability_x_household_avg.csv", c("variable", "category"))
+        } 
+
+  # Compare results 
+    library(data.table)
+    rd <- function(f) fread(file.path(results_dir, f))
+
+    # Overall
+    ov <- rd("l1_disability_marginal_avg.csv")
+    overall <- data.table(group = "Overall", category = "All",
+                          census = ov$census_prevalence, p1 = ov$p1_prevalence, p2 = ov$p2_prevalence)
+
+    # By sex
+    sex <- merge(rd("census_sex_x_disability.csv")[, .(category, census = census_prevalence)],
+                rd("l1_disability_x_ind_sex_avg.csv")[, .(category, p1 = p1_prevalence, p2 = p2_prevalence)],
+                by = "category")
+    sex[, group := "Sex"]
+    sex[, category := c(f = "Female", m = "Male")[category]]
+
+    # By age
+    age <- merge(rd("census_age_x_disability.csv")[, .(category, census = census_prevalence)],
+                rd("l1_disability_x_ind_age_avg.csv")[, .(category, p1 = p1_prevalence, p2 = p2_prevalence)],
+                by = "category")
+    age[, group := "Age"]
+    age[, category := sub("65p", "65+", sub("_", "–", category))]
+
+    # Combine, as percentages
+    tab <- rbind(overall, sex, age, use.names = TRUE)
+    tab[, `:=`(p1_minus_census = p1 - census, p2_minus_p1 = p2 - p1)]
+    num <- c("census", "p1", "p2", "p1_minus_census", "p2_minus_p1")
+    tab[, (num) := lapply(.SD, function(x) round(100 * x, 1)), .SDcols = num]
+    setcolorder(tab, c("group", "category"))
+
+    print(tab)
+    fwrite(tab, file.path(results_dir, "disability_prevalence_table.csv"))
+
+```
+```{r investigate p1 - census discrepancy}
+# Chunk 1 - look at scatter plots of the var fits for EUCLID run
+  # build plots
+    getwd()
+    results_dir <- "results_full_test_euclid_imputed_allages"
+    list.files(results_dir)
+    v <- rd("p1_validate_run001.csv")
+    v[, group := sub("%.*", "", variable)]
+
+    ggplot(v, aes(constraint_fraction, synth_fraction)) +
+      geom_point(alpha = 0.15, size = 0.6) +
+      geom_abline(linetype = 2, colour = "red") +
+      facet_wrap(~ group, scales = "free") +
+      labs(x = "Census fraction", y = "P1 synthetic fraction")
+      # Results 
+      # Household types fit worst. 
+      # White ethnicity fits ok, others not. 
+      # Main cloud is steeper than the line, so larger cells are overfilled, small ones are underfilled. 
+      # also a few right side outliers (might be student halls or care homes)
+      # next: figure out which household type is which band by coloring them
+  # color HHs 
+    ggplot(v[group == "hh_type"], aes(constraint_fraction, synth_fraction, colour = variable)) +
+      geom_point(alpha = 0.3, size = 0.7) +
+      geom_abline(linetype = 2) +
+      labs(x = "Census fraction", y = "P1 synthetic fraction", colour = NULL) +
+      theme(legend.position = "bottom", legend.direction = "vertical")
+      # Results 
+      # P1 is overfilling with one-person households 
+      # disability is more common among one-person hhs; so hh type isn't behind the disability underestimate in P1
+      # HH fit itself is poor, maybe connected to the hh count problem 
+      # next: check non/disabled cells by coloring them 
+  # color disability cats 
+    sad <- v[group == "ind_sex_age_dis"]
+    sad[, dis := ifelse(grepl("_dis1$", variable), "disabled", "not disabled")]
+    sad[, age := sub("^.*%[fm]_(.*)_dis[01]$", "\\1", variable)]
+
+    ggplot(sad, aes(constraint_fraction, synth_fraction, colour = age)) +
+      geom_point(alpha = 0.3, size = 0.7) +
+      geom_abline(linetype = 2) +
+      facet_wrap(~ dis, scales = "free") +
+      labs(x = "Census fraction", y = "P1 synthetic fraction", colour = "Age")
+      # Results
+      # Disabled cells actually fit ok
+      # younger ages sit slightly below, older ages slightly above: the lower prevalene cells (disability at younger ages) are slightly underfilled;
+      # whereas the higher prevalence cells (disability at older ages) are slightly overfilled
+      # Nondisabled cells are the misfit: younger peple are consistently below, ages 25+ are consistently above. 
+      # 'Student halls' hypothetis still relevant here - too hard for P1 to reproduce with a hh-based method. 
+      # again: one person hhs are overilled. So the issue is P1's age and hh structure; disability undershoot is likely a knock-on effect in the small young-age cells.
+      # Probably linked to a hh count issue (i.e. one hh placed for every census person)
+      # next: Check the outliers really are student areas 
+  # check LSOA outliers for student areas 
+    out <- sad[age == "16_24" & dis == "not disabled"][
+              , .(cen = sum(constraint_fraction), syn = sum(synth_fraction)), by = geography_code][
+              order(-(cen - syn))][1:10]
+    out
+    # Results
+    # searched the top outlier LSOA (E01025690) it's Charnwood, home to Loughborough university
+    # LSOA look up file now saved to main compass dir
+
+# Chunk 2 - look at absolute numbers for EUCLID 
+  # are households being overassigned? 
+  micro <- fread(master_p1_microdata)
+  hc <- grep("^hh_type%", names(micro), value = TRUE)
+
+  syn_hh <- merge(pop, micro[, c("hidp", hc), with = FALSE],
+                  by.x = "microdata_id", by.y = "hidp")
+
+  # Share of selected households of each type, averaged over LSOAs
+  mine <- syn_hh[, lapply(.SD, mean), by = area_id, .SDcols = hc]
+  from_pop <- colMeans(mine[, ..hc])
+
+  # What the validate file says
+  from_validate <- v[variable %in% hc, .(m = mean(synth_fraction)), by = variable][match(hc, variable), m]
+
+  round(cbind(from_pop, from_validate), 3)
+  # Results
+  # validate file shows inflated one-person hhs, and deflated larger hh types. Suggests weighting hhs by something like: 1/hh size
+  # or: mixing up hhs and people when calcluating shares. so hh_type panel in the plots are misleading. P1 hh structure is reasonably good. 
+  # further evidence compass is placing one hh for every census person. so mixing up hh level and person level counts in a few places. 
+  # next: check if age misfit is similar, comparing selected people with the validate file
+  # check age misfit 
+    d1_age <- sub("^.*%[fm]_(.*)_dis1$", "\\1", d1)
+    dc_age <- sub("^.*%[fm]_(.*)_dis[01]$", "\\1", dc)
+
+    p1    <- rowsum(colSums(s[, ..d1]), d1_age) / rowsum(colSums(s[, ..dc]), dc_age)
+    cen_p <- rowsum(colSums(cen[, ..d1]), d1_age) / rowsum(colSums(cen[, ..dc]), dc_age)
+    round(cbind(p1_actual = p1, census = cen_p, gap_pp = 100 * (p1 - cen_p)), 3)
+    sad <- v[variable %in% dc]
+  # check compass' validate file for dis x age compared with actual (census)
+    sad[, age := sub("^.*%[fm]_(.*)_dis[01]$", "\\1", variable)]
+    sad[, dis1 := grepl("_dis1$", variable)]
+
+    compass_view <- sad[, .(prev = sum(synth_fraction[dis1]) / sum(synth_fraction)),
+                        by = .(geography_code, age)][
+                        , .(compass_view = mean(prev)), by = age]
+    compass_view[, p1_actual := p1[match(age, rownames(p1))]]
+    compass_view[, census := cen_p[match(age, rownames(cen_p))]]
+    compass_view[, lapply(.SD, function(x) if (is.numeric(x)) round(x, 3) else x)]
+    # compass disability differs from actual figure by 2-5pp in most age groups. 
+    # compass' internal counting of people doesn't correspond to the hhs it selects. 
+    # hh fractions are wrong, age fractions are wrong, disability fractions are wrong. 
+    # so mismatch between compass input expectations vs actual...
+    # seems it expects one row per ind, but given one row per hh
+    # next: see how compass expect microdata to be structured. 
+    # actually, i want to see how it is calculating prevalence across hhs and inds, per LSOA/overall 
+# Chunk 3 - fresh run with COSINE
+  # check how we diiiiid
+    getwd()
+    results_dir <- "results_full_test_cosine_imputed"
+    rd("l1_disability_marginal_avg.csv")[, .(census_prevalence, p1_prevalence, p1_minus_census)]
+    rd("census_sex_x_disability.csv")
+
+    # Direct check from the population file
+    pop   <- rd("p1_pop_run001.csv")
+    micro <- fread(p1_micro)
+    dc <- grep("^ind_sex_age_dis%", names(micro), value = TRUE); d1 <- grep("_dis1$", dc, value = TRUE)
+    s  <- merge(pop, micro[, c("hidp", dc), with = FALSE], by.x = "microdata_id", by.y = "hidp")
+    c(direct = sum(s[, ..d1]) / sum(s[, ..dc]), matched = nrow(s) == nrow(pop))
+    # Results
+    # This works. Cosine only compares the proportions across cells, ignoring overall size, so inflated count doesn' tmatter.
+    # (whereas euclidean distance compares raw counts, so size mismatch affects which hh it picks) 
+    # house count issue may still persist 
+    # next: check for errors hiding within close overall fit 
+  # check for errors across age groups
+    dc_age <- sub("^.*%[fm]_(.*)_dis[01]$", "\\1", dc)
+    d1_age <- sub("^.*%[fm]_(.*)_dis1$", "\\1", d1)
+    cen <- as.data.table(master_p1_constraints)[get(names(master_p1_constraints)[1]) %in% unique(pop$area_id)]
+
+    p1    <- rowsum(colSums(s[, ..d1]), d1_age) / rowsum(colSums(s[, ..dc]), dc_age)
+    cen_p <- rowsum(colSums(cen[, ..d1]), d1_age) / rowsum(colSums(cen[, ..dc]), dc_age)
+    round(cbind(p1 = p1, census = cen_p, gap_pp = 100 * (p1 - cen_p)), 3)
+    # Results 
+    # overshooting kids in P1, likely b/c definition doesn't include 'limiting' limitation 
+    # undershooting teens, likely b/c student halls aren't included in survey data/P1. 
+    # otherwise, within 1%. 
+    # P1 benchmark now looking in good shape!! 
+
+# Chunk 4 - scatter plot for COSINE runs
+  # ensure correct results_dir
+    results_dir <- "results_full_test_cosine_imputed_noheating"
+    v <- rd("p1_validate_run001.csv")
+    v[, group := sub("%.*", "", variable)]
+
+    ggplot(v, aes(constraint_fraction, synth_fraction)) +
+      geom_point(alpha = 0.15, size = 0.6) +
+      geom_abline(linetype = 2, colour = "red") +
+      facet_wrap(~ group, scales = "free") +
+      labs(x = "Census fraction", y = "P1 synthetic fraction")
+      # Results 
+      # Household types fit worst. 
+      # White ethnicity fits ok, others not. 
+      # Main cloud is steeper than the line, so larger cells are overfilled, small ones are underfilled. 
+      # also a few right side outliers (might be student halls or care homes)
+      # next: figure out which household type is which band by coloring them
+  # color HHs 
+    ggplot(v[group == "hh_type"], aes(constraint_fraction, synth_fraction, colour = variable)) +
+      geom_point(alpha = 0.3, size = 0.7) +
+      geom_abline(linetype = 2) +
+      labs(x = "Census fraction", y = "P1 synthetic fraction", colour = NULL) +
+      theme(legend.position = "bottom", legend.direction = "vertical")
+      # Results 
+      # P1 is overfilling with one-person households 
+      # disability is more common among one-person hhs; so hh type isn't behind the disability underestimate in P1
+      # HH fit itself is poor, maybe connected to the hh count problem 
+      # next: check non/disabled cells by coloring them 
+  # color disability cats 
+    sad <- v[group == "ind_sex_age_dis"]
+    sad[, dis := ifelse(grepl("_dis1$", variable), "disabled", "not disabled")]
+    sad[, age := sub("^.*%[fm]_(.*)_dis[01]$", "\\1", variable)]
+
+    ggplot(sad, aes(constraint_fraction, synth_fraction, colour = age)) +
+      geom_point(alpha = 0.3, size = 0.7) +
+      geom_abline(linetype = 2) +
+      facet_wrap(~ dis, scales = "free") +
+      labs(x = "Census fraction", y = "P1 synthetic fraction", colour = "Age")
+
+```
+
+```{r box plots}
+# Box plots for absolute numbers 
+  # Judge fit by LSOAs, not aggregated national total. 
+  # Want to show for each LSOA how far each age/sex/dis cell's synthetic share is from the census share
+  # x axis: age group
+  # y axis: synthetic share minus census chare (in pp)
+  # colour: non/dis
+  # panels: m/f
+
+  library(data.table); library(ggplot2)
+  # built from p1_pop 
+  pop   <- rd("p1_pop_run001.csv")
+  micro <- fread(p1_micro)   # the microdata file this run used
+  dc    <- grep("^ind_sex_age_dis%", names(micro), value = TRUE)
+
+  # Synthetic count and share per LSOA and cell
+  s   <- merge(pop, micro[, c("hidp", dc), with = FALSE], by.x = "microdata_id", by.y = "hidp")
+  syn <- melt(s[, lapply(.SD, sum), by = area_id, .SDcols = dc],
+              id.vars = "area_id", variable.name = "cell", value.name = "syn_n")
+  syn[, syn_frac := syn_n / sum(syn_n), by = area_id]
+
+  # Census count and share per LSOA and cell
+  con <- as.data.table(master_p1_constraints); id <- names(con)[1]
+  cen <- melt(con[get(id) %in% syn$area_id, c(id, dc), with = FALSE],
+              id.vars = id, variable.name = "cell", value.name = "cen_n")
+  setnames(cen, id, "area_id")
+  cen[, cen_frac := cen_n / sum(cen_n), by = area_id]
+
+  d <- merge(syn, cen, by = c("area_id", "cell"))
+  d[, diff_pp := 100 * (syn_frac - cen_frac)]
+  d[, diff_n  := syn_frac * sum(cen_n) - cen_n, by = area_id]   # synthetic scaled to census population
+
+  x <- sub("^ind_sex_age_dis%", "", d$cell)
+  d[, sex := ifelse(substr(x, 1, 1) == "f", "Female", "Male")]
+  d[, dis := ifelse(grepl("_dis1$", x), "Disabled", "Not disabled")]
+  d[, age := factor(sub("65p", "65+", sub("_", "–", sub("^[fm]_(.*)_dis[01]$", "\\1", x))),
+                    levels = c("00–15", "16–24", "25–34", "35–49", "50–64", "65+"))]
+
+  # Figure
+  ggplot(d, aes(age, diff_pp, fill = dis)) +
+    geom_hline(yintercept = 0, linetype = 2) +
+    geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3, width = 0.7) +
+    facet_wrap(~ sex) +
+    labs(x = "Age group", y = "Synthetic − census share (percentage points)", fill = NULL) +
+    theme_minimal() + theme(legend.position = "bottom")
+
+  # Summary to go with it
+  d[, .(mean_abs_pp = round(mean(abs(diff_pp)), 2),
+        median_pp   = round(median(diff_pp), 2),
+        mean_abs_n  = round(mean(abs(diff_n)), 1)), by = .(dis, age)][order(dis, age)]
+
+fit_by_type <- function(dir) {
+  v <- fread(file.path(dir, "p1_validate_run001.csv"))[grepl("^hh_type%", variable)]
+  v[, .(mean_abs_pp = round(100 * mean(abs(synth_fraction - constraint_fraction)), 2)), by = variable]
+}
+merge(fit_by_type("results_full_test_cosine_imputed"),
+      fit_by_type("results_full_test_cosine_imputed_noheating"),   # use your actual folder name
+      by = "variable", suffixes = c("_with_heating", "_no_heating"))
+```
+
+
+
+
+
+```{r dated - scatter plots}
+# First attempt 
+  library(ggplot2)
+
+  # Scatter: synthetic vs constraint fraction, disability only
+      # Scatter: disability prevalence per LSOA, synthetic vs census
+        plot_dis_scatter <- function(pop = "p1", run = 1, dir = results_dir,
+                                    micro_file = if (pop == "p1") run_p1_micro else run_p2_micro) {
+
+          id <- sprintf("%03d", run)
+
+          # census prevalence per LSOA
+          con <- fread(file.path(dir, paste0(pop, "_constraints_full.csv")))
+          d1  <- grep("^ind_sex_age_dis%.*_dis1$", names(con), value = TRUE)
+          d0  <- grep("^ind_sex_age_dis%.*_dis0$", names(con), value = TRUE)
+          census <- data.table(
+            geography_code      = con$LSOA21CD,
+            constraint_fraction = rowSums(con[, ..d1]) / rowSums(con[, c(d1, d0), with = FALSE])
+          )
+
+          # disabled / non-disabled people in each microdata household
+          micro <- fread(micro_file, select = c("hidp", d1, d0), colClasses = list(character = "hidp"))
+          micro <- data.table(microdata_id = micro$hidp,
+                              n1 = rowSums(micro[, ..d1]), n0 = rowSums(micro[, ..d0]))
+
+          # synthetic population: find the area column, then join to microdata
+          popdt   <- fread(file.path(dir, paste0(pop, "_pop_run", id, ".csv")))
+          geo_col <- setdiff(names(popdt), "microdata_id")
+          geo_col <- geo_col[sapply(geo_col, function(x) all(head(popdt[[x]], 100) %in% con$LSOA21CD))][1]
+          if (is.na(geo_col)) stop("Could not find the LSOA column in the population file.")
+          popdt <- data.table(geography_code = popdt[[geo_col]],
+                              microdata_id   = as.character(popdt$microdata_id))
+
+          synth <- merge(popdt, micro, by = "microdata_id")[
+            , .(synth_fraction = sum(n1) / (sum(n1) + sum(n0))), by = geography_code]
+
+          dt  <- merge(census, synth, by = "geography_code")
+          mse <- dt[, mean((synth_fraction - constraint_fraction)^2)]
+          lim <- max(dt$synth_fraction, dt$constraint_fraction)
+
+          p <- ggplot(dt, aes(x = constraint_fraction, y = synth_fraction)) +
+            geom_point(size = 1, alpha = 0.4) +
+            geom_abline(slope = 1, intercept = 0, linewidth = 1) +
+            geom_smooth(method = "lm", formula = y ~ x, se = FALSE, colour = "red", linewidth = 1) +
+            coord_equal(xlim = c(0, lim), ylim = c(0, lim), expand = FALSE) +
+            labs(x = "disability prevalence in constraint table",
+                y = "disability prevalence in synthetic population",
+                title = paste0(toupper(pop), " — disability prevalence by LSOA, run ", run),
+                caption = paste0("MSE of ", sprintf("%.6f", mse),
+                                  " | mean census ", sprintf("%.3f", mean(dt$constraint_fraction)),
+                                  " | mean synthetic ", sprintf("%.3f", mean(dt$synth_fraction)),
+                                  " | unweighted by population size of areas")) +
+            theme_classic()
+
+          ggsave(file.path(dir, paste0(pop, "_scatter_disability_run", id, ".jpeg")),
+                plot = p, units = "cm", width = 18, height = 18)
+          print(p)
+          invisible(p)
+        }
+
+        plot_dis_scatter("p1")
+
+        val <- fread(file.path(results_dir, "p1_validate_run001.csv"))
+        cell <- val[, .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable]
+        cell[, diff := synth - census]
+        print(cell[order(-abs(diff))])
+
+        p <- plot_dis_scatter("p1")
+        d <- as.data.table(p$data)
+        d[, gap := synth_fraction - constraint_fraction]
+        d[order(-gap)][1:5]
+
+        micro <- fread(master_p1_microdata)
+        kids  <- grep("^ind_sex_age_dis%[fm]_00_15_", names(micro), value = TRUE)
+        micro[, n_kids := rowSums(.SD), .SDcols = kids]
+
+        micro[, .(households = .N, none_counted = sum(n_kids == 0), mean_kids = mean(n_kids)),
+              by = .(lone_parent = `hh_type%lone_parent`,
+                    couple_with_children = `hh_type%couple_married_civil_with_children`)]
+        a2549 <- grep("^ind_sex_age_dis%[fm]_(25_34|35_49)_", names(micro), value = TRUE)
+        micro[, n_2549 := rowSums(.SD), .SDcols = a2549]
+        micro[n_kids > 0, .(households = .N, kids = sum(n_kids), adults_25_49 = sum(n_2549),
+                            ratio = sum(n_kids) / sum(n_2549))]
+
+
+      # plot_dis_scatter("p2")
+      # Test for missing children
+        p <- plot_dis_scatter("p1")
+        d <- as.data.table(p$data)
+
+        con  <- fread(file.path(results_dir, "p1_constraints_full.csv"))
+        kids <- grep("_00_15_", names(con), value = TRUE)
+        allc <- grep("^ind_sex_age_dis%", names(con), value = TRUE)
+
+        d <- merge(d, data.table(geography_code = con$LSOA21CD,
+                                child_share = rowSums(con[, ..kids]) / rowSums(con[, ..allc])),
+                  by = "geography_code")
+        d[, gap := synth_fraction - constraint_fraction]
+
+        cor(d$child_share, d$gap)
+        plot(d$child_share, d$gap, xlab = "census share aged 0-15", ylab = "synthetic minus census prevalence")
+          # No clear pattern for missing ages 
+
+          table(read.csv(file.path(results_dir, "p1_groups_full.csv"), check.names = FALSE)$group)
+          val <- fread(file.path(results_dir, "p1_validate_run001.csv"))
+          val[, .(total = sum(constraint_fraction)), by = geography_code][, summary(total)]
+
+          file.mtime(file.path(results_dir, c("p1_groups_full.csv", "p1_pop_run001.csv", "p1_validate_run001.csv")))
+
+          val[grepl("_dis1$", variable),
+              .(synth = sum(synth_fraction), census = sum(constraint_fraction)),
+              by = geography_code][, .(mean_synth = mean(synth), mean_census = mean(census))]
+
+          str(l_definitions[c("initialTemp", "minTemp", "coolingRate", "reheatFactor",
+                              "fitnessThreshold", "maxIterations", "windowSize", "change", "distance")])
+
+                              
+  # Scatter: synthetic vs constraint fraction, age/sex/disability
+
+      plot_fit_scatter <- function(pop = "p1", run = 1, dir = results_dir) {
+
+        id <- sprintf("%03d", run)
+        dt <- fread(file.path(dir, paste0(pop, "_validate_run", id, ".csv")))
+        dt <- dt[grepl("^ind_sex_age_dis%", variable) &
+                 !is.na(synth_fraction) & !is.na(constraint_fraction)]
+
+        # split e.g. "f_00_15_dis1" into sex / age / disability
+        dt[, category   := sub("^[^%]*%", "", variable)]
+        dt[, sex        := ifelse(substr(category, 1, 1) == "f", "Female", "Male")]
+        dt[, disability := ifelse(grepl("_dis1$", category), "Disabled", "Not disabled")]
+        dt[, age        := sub("^[fm]_(.*)_dis[01]$", "\\1", category)]
+
+        mse <- dt[, mean((synth_fraction - constraint_fraction)^2)]
+        lim <- max(dt$synth_fraction, dt$constraint_fraction)
+
+        p <- ggplot(dt, aes(x = constraint_fraction, y = synth_fraction, colour = age)) +
+          geom_point(size = 1, alpha = 0.4) +
+          geom_abline(slope = 1, intercept = 0, linewidth = 1) +
+          geom_smooth(aes(group = 1), method = "lm", formula = y ~ x, se = FALSE,
+                      colour = "red", linewidth = 1) +
+          facet_grid(sex ~ disability) +
+          coord_equal(xlim = c(0, lim), ylim = c(0, lim), expand = FALSE) +
+          labs(x = "relative frequency in constraint table",
+               y = "relative frequency in synthetic population",
+               title = paste0(toupper(pop), " — age / sex / disability, run ", run),
+               caption = paste0("Geography: LSOA | MSE of ", sprintf("%.6f", mse),
+                                " | unweighted by population size of areas"),
+               colour = "Age band") +
+          theme_classic()
+
+        ggsave(file.path(dir, paste0(pop, "_scatter_sex_age_dis_run", id, ".jpeg")),
+               plot = p, units = "cm", width = 20, height = 20)
+        print(p)
+        invisible(p)
+      }
+
+      plot_fit_scatter("p1")
+      # plot_fit_scatter("p2")
+
+```
+```{r dated - debug p1 census diff}
+# What're we holding onto, Sam? 
+  # Check 1 
+  val <- fread("results_null_test/p1_validate_run001.csv")
+  cell <- val[, .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable]
+  cell[, diff := synth - census]
+  print(cell[order(-abs(diff))])
+
+  # Check 2
+  micro <- fread("results_null_test/p1_microdata_null.csv")
+  cols  <- setdiff(names(micro), "hidp")
+  con   <- read.csv("results_null_test/p1_constraints_full.csv", check.names = FALSE)
+
+  comp <- data.table(
+    variable     = cols,
+    micro_people = colSums(micro[, ..cols]),
+    micro_share  = colSums(micro[, ..cols]) / sum(micro[, ..cols]),
+    census_share = colSums(con[, cols]) / sum(con[, cols])
+  )
+  print(comp)
+
+  # Check 3
+  print(read.csv("results_null_test/p1_groups_full.csv", check.names = FALSE))
+
+# Debugging for skewed households (missing hhs with children)
+  results_dir
+  length(common_lsoas)
+  list.files(results_dir)
+  read.csv(file.path(results_dir, "l1_disability_marginal_avg.csv"))
+  file.mtime(file.path(results_dir, "l1_disability_marginal_avg.csv"))
+
+  plot_dis_scatter("p1")
+
+  val <- fread(file.path(results_dir, "p1_validate_run001.csv"))
+  val[, dimension := sub("%.*", "", variable)]
+  val[, .(mse = mean((synth_fraction - constraint_fraction)^2),
+          mean_abs_error = mean(abs(synth_fraction - constraint_fraction))),
+      by = dimension][order(-mse)]
+
+
+  val[dimension == "ind_health",
+      .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable][
+      , diff := synth - census][]
+
+  # which household types are off, and in which direction
+  val[dimension == "hh_type",
+      .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable][
+      , diff := synth - census][order(diff)]
+
+  # age and disability cells in the full model, to compare with the null-model table
+  val[dimension == "ind_sex_age_dis",
+      .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable][
+      , diff := synth - census][order(-abs(diff))]
+
+
+  micro <- fread(master_p1_microdata)
+  ht <- grep("^hh_type%", names(micro), value = TRUE)
+  data.table(variable = ht, pool_share = colSums(micro[, ..ht]) / nrow(micro))
+
+  micro[, hh_size := rowSums(.SD), .SDcols = patterns("^ind_sex_age_dis%")]
+  micro[, .N, by = hh_size][order(hh_size)][, share := N / sum(N)][]
+
+  raw <- fread("path/to/raw_household_file.csv", select = c("hidp", "<wave>_hhsize"))
+  setnames(raw, 2, "raw_size")
+  raw[, hidp := as.character(hidp)]
+
+  m <- merge(micro[, .(hidp = as.character(hidp), hh_size)], raw, by = "hidp")
+  m[, .(households = .N, sizes_match = sum(hh_size == raw_size), mean_missing = mean(raw_size - hh_size))]
+
+  # and the size distribution in the raw wave overall
+  raw[, .N, by = raw_size][order(raw_size)][, share := N / sum(N)][]
+
+  micro[, type := names(.SD)[max.col(.SD)], .SDcols = patterns("^hh_type%")]
+  micro[, .(households = .N,
+            impossible = sum(hh_size < 2 & !grepl("one_person|other", type)),
+            one_person_but_bigger = sum(hh_size > 1 & grepl("one_person", type))),
+        by = type]
+
+  for (pfx in c("ind_sex_age_dis", "ind_education", "ind_ethnicity", "ind_health")) {
+    micro[, (pfx) := rowSums(.SD), .SDcols = patterns(paste0("^", pfx, "%"))]
+  }
+  micro[, .(households = .N,
+            edu_differs    = sum(ind_education != ind_sex_age_dis),
+            eth_differs    = sum(ind_ethnicity != ind_sex_age_dis),
+            health_differs = sum(ind_health    != ind_sex_age_dis))]
+
+  # are the gaps exactly the children?
+  micro[ind_health != ind_sex_age_dis, summary(ind_sex_age_dis - ind_health - n_kids)]
+  micro[ind_education != ind_sex_age_dis, summary(ind_sex_age_dis - ind_education - n_kids)]
+
+  # who do the census constraints cover? ratios near 1 mean all ages; near 0.81 means adults only
+  con <- fread(file.path(results_dir, "p1_constraints_full.csv"))
+  tot <- function(p) rowSums(con[, .SD, .SDcols = patterns(paste0("^", p, "%"))])
+  summary(tot("ind_health")    / tot("ind_sex_age_dis"))
+  summary(tot("ind_education") / tot("ind_sex_age_dis"))
+
+  kids <- grep("^ind_sex_age_dis%[fm]_00_15_", names(micro), value = TRUE)
+  micro[, n_kids := rowSums(.SD), .SDcols = kids]
+
+  micro[ind_health != ind_sex_age_dis, summary(ind_sex_age_dis - ind_health - n_kids)]
+
+
+# Children imputation didn't seem to help
+  val <- fread(file.path(results_dir, "p1_validate_run001.csv"))
+  val[, dimension := sub("%.*", "", variable)]
+  val[, .(mse = mean((synth_fraction - constraint_fraction)^2),
+          mean_abs_error = mean(abs(synth_fraction - constraint_fraction))), by = dimension][order(-mse)]
+  val[dimension == "hh_type", .(synth = mean(synth_fraction), census = mean(constraint_fraction)), by = variable]
+# Removing health constraint didn't seem to help 
+  rd <- function(f) fread(file.path(results_dir, f))
+
+  rd("l1_disability_x_ind_age_avg.csv")
+  rd("census_age_x_disability.csv")
+  rd("l1_disability_x_ind_sex_avg.csv")
+
+  v <- rd("p1_validate_run001.csv")
+  str(v)
+  head(v)
+
+
+# Unweighted survey prevalence by age vs census
+  micro <- fread(master_p1_microdata)
+  ages <- c("00_15","16_24","25_34","35_49","50_64","65p")
+  svy <- sapply(ages, function(a) {
+    d1 <- sum(micro[[paste0("ind_sex_age_dis%f_", a, "_dis1")]] + micro[[paste0("ind_sex_age_dis%m_", a, "_dis1")]])
+    d0 <- sum(micro[[paste0("ind_sex_age_dis%f_", a, "_dis0")]] + micro[[paste0("ind_sex_age_dis%m_", a, "_dis0")]])
+    d1 / (d0 + d1)
+  })
+  cen <- rd("census_age_x_disability.csv")
+  data.table(age = ages, survey = round(svy, 3), census = round(cen$census_prevalence, 3))
+
+
+  grp <- as.data.table(master_p1_groups)
+  con <- as.data.table(master_p1_constraints)
+
+  cmp <- data.table(
+    grp,
+    survey = colSums(micro[, grp$heading, with = FALSE]),
+    census = colSums(con[, grp$heading, with = FALSE])
+  )
+  cmp[, `:=`(survey_share = survey / sum(survey),
+            census_share = census / sum(census)), by = group]
+  cmp[, ratio := round(survey_share / census_share, 2)]
+
+# Most over- and under-represented categories in the survey
+  print(cmp[!grepl("^ind_sex_age_dis", heading)][order(-abs(log(ratio)))][1:12,
+      .(heading, survey_share = round(survey_share, 3),
+        census_share = round(census_share, 3), ratio)])
+        # heating looks wild 
+        dis1 <- grep("^ind_sex_age_dis%.*_dis1$", names(micro), value = TRUE)
+        dis0 <- grep("^ind_sex_age_dis%.*_dis0$", names(micro), value = TRUE)
+        micro[, n_dis := rowSums(.SD), .SDcols = dis1]
+        micro[, n_all := rowSums(.SD), .SDcols = c(dis0, dis1)]
+
+        # Disability prevalence by heating status
+        micro[, .(households = .N, disability_prev = round(sum(n_dis) / sum(n_all), 3)),
+              by = .(without_heating = `hh_heating%without_heating` > 0)]
+
+        # And by household type
+        hh_types <- grep("^hh_type%", names(micro), value = TRUE)
+        rbindlist(lapply(hh_types, function(h)
+          micro[get(h) > 0, .(type = sub("hh_type%", "", h), households = .N,
+                              disability_prev = round(sum(n_dis) / sum(n_all), 3))]))
+# reweight survey data? 
+  con  <- as.data.table(master_p1_constraints)
+  hcol <- grep("^hh_type%", names(m), value = TRUE)
+
+  cen_share <- colSums(con[, ..hcol]); cen_share <- cen_share / sum(cen_share)
+  svy_share <- colSums(m[, ..hcol]);   svy_share <- svy_share / sum(svy_share)
+  w_type    <- cen_share / svy_share
+  print(round(w_type, 2))   # how much each household type gets scaled up or down
+
+  # each household gets the weight for its type
+  m[, w := as.vector(as.matrix(m[, ..hcol]) %*% w_type)]
+
+  c(unweighted     = sum(m[, ..d1]) / sum(m[, ..dc]),
+    hh_type_only   = sum(rowSums(m[, ..d1]) * m$w) / sum(rowSums(m[, ..dc]) * m$w),
+    census         = 0.1729)
+
+```
+
+```{r dated - LSOAs}
+# LSOAs
+  # interpret_worst_lsoas.R
+  # Summarizes l2_worst100_by_run: which constraint variables most often show up
+  # among the top-5 error drivers for the worst-fitting LSOAs, how large their
+  # errors typically are, and whether the pattern is concentrated (one variable
+  # dominating) or spread out (broadly poor fit).
+
+  library(data.table)
+
+  l2 <- fread("results_full/l2_worst100_by_run.csv")
+
+  summarise_side <- function(dt, side) {
+    var_cols <- paste0(side, "_top", 1:5, "_variable")
+    err_cols <- paste0(side, "_top", 1:5, "_error")
+
+    long <- rbindlist(lapply(1:5, function(k) {
+      dt[, .(geography_code, run,
+            rank_slot = k,
+            variable = get(var_cols[k]),
+            error = get(err_cols[k]))]
+    }))
+    long <- long[!is.na(variable)]
+
+    summary <- long[, .(
+      n_appearances   = .N,                                  # how often this variable shows up in ANY top-5 slot
+      n_unique_lsoas  = uniqueN(geography_code),              # across how many distinct worst-LSOAs
+      mean_abs_error  = mean(abs(error)),
+      mean_error      = mean(error),                          # sign matters: consistently negative = under-assigned
+      pct_top1        = mean(rank_slot == 1) * 100,           # how often it's the single WORST driver, not just present
+      side            = side
+    ), by = variable]
+
+    setorder(summary, -n_appearances)
+    summary
+  }
+
+  p1_summary <- summarise_side(l2, "p1")
+  p2_summary <- summarise_side(l2, "p2")
+
+  cat("=== P1: variables most often driving the worst-100 LSOAs ===\n")
+  print(head(p1_summary, 15))
+
+  cat("\n=== P2: variables most often driving the worst-100 LSOAs ===\n")
+  print(head(p2_summary, 15))
+
+  fwrite(p1_summary, "results_full/worst_lsoa_variable_summary_p1.csv")
+  fwrite(p2_summary, "results_full/worst_lsoa_variable_summary_p2.csv")
+
+  # concentration check: what share of ALL top-5 appearances does the single
+  # most common variable account for? High = one variable dominates the
+  # worst-fit cases; low = errors are broadly spread across many constraints.
+  cat("\nP1 concentration: top variable accounts for ",
+      round(100 * p1_summary$n_appearances[1] / sum(p1_summary$n_appearances), 1),
+      "% of all top-5 appearances\n", sep = "")
+  cat("P2 concentration: top variable accounts for ",
+      round(100 * p2_summary$n_appearances[1] / sum(p2_summary$n_appearances), 1),
+      "% of all top-5 appearances\n", sep = "")
+
+
+  # hh_type_dis_by_age.R
+  # Tests whether age confounds the disability x household-type pattern by
+  # computing disability prevalence WITHIN each household type, separately
+  # for each age band, across all completed runs. If the household-type gaps
+  # (e.g. one-person=23% vs couple-with-children=6%) shrink substantially once
+  # age is held constant, that confirms age was driving most/all of the raw
+  # association. If gaps persist within age bands, there's a real household-
+  # type effect beyond age alone.
+
+  library(data.table)
+  library(jsonlite)
+
+  results_dir <- "results_full"
+
+  master_p1_constraints <- read.csv("data/England/census2021_e_go_10.csv", check.names=FALSE)
+  master_p1_groups      <- read.csv("data/England/groups_e_10.csv", check.names=FALSE)
+  master_p1_microdata   <- "data/England/us_hh_export_e_go_10.csv"
+
+  master_p2_constraints <- read.csv("data/England/census2021_e_go_10_sim.csv", check.names=FALSE)
+  master_p2_groups      <- read.csv("data/England/groups_e_10_sim.csv", check.names=FALSE)
+  master_p2_microdata   <- "data/England/us_hh_export_e_go_10_sim.csv"
+
+  age_bands <- c("00_15", "16_24", "25_34", "35_49", "50_64", "65p")
+  hh_level_prefixes <- c("hh_type")   # focus on household type; add "hh_urban_rural","hh_heating" if wanted too
+
+  p1_micro_df <- read.csv(master_p1_microdata, check.names=FALSE)
+  p2_micro_df <- read.csv(master_p2_microdata, check.names=FALSE)
+
+  hh_level_cols <- names(p1_micro_df)[sapply(strsplit(names(p1_micro_df), "%"), function(x) x[1]) %in% hh_level_prefixes]
+
+  dis_cols_all <- names(p1_micro_df)[grepl("^ind_sex_age_dis%", names(p1_micro_df))]
+
+  p1_lookup_mat <- as.matrix(p1_micro_df[, c(dis_cols_all, hh_level_cols), drop=FALSE])
+  p2_lookup_mat <- as.matrix(p2_micro_df[, c(dis_cols_all, hh_level_cols), drop=FALSE])
+  rownames(p1_lookup_mat) <- as.character(p1_micro_df$hidp)
+  rownames(p2_lookup_mat) <- as.character(p2_micro_df$hidp)
+
+  prevalence_weighted <- function(mat, idx, counts, dis1_cols_sub, dis0_cols_sub) {
+    if(length(idx)==0 || length(c(dis1_cols_sub, dis0_cols_sub))==0) {
+      return(data.frame(dis1_count=0, pop_count=0, prevalence=NA_real_))
+    }
+    cols <- c(dis1_cols_sub, dis0_cols_sub)
+    sub <- mat[idx, cols, drop=FALSE] * counts
+    dis1_n <- sum(sub[, dis1_cols_sub, drop=FALSE], na.rm=TRUE)
+    pop_n <- sum(sub, na.rm=TRUE)
+    data.frame(dis1_count=dis1_n, pop_count=pop_n, prevalence=ifelse(pop_n>0, dis1_n/pop_n, NA_real_))
+  }
+
+  # find all completed run population files
+  p1_pop_files <- list.files(results_dir, pattern="^p1_pop_run\\d+\\.csv$", full.names=TRUE)
+  run_ids <- gsub(".*run(\\d+)\\.csv$", "\\1", p1_pop_files)
+
+  results <- list()
+
+  for (id in run_ids) {
+
+    p1_pop_file <- file.path(results_dir, paste0("p1_pop_run", id, ".csv"))
+    p2_pop_file <- file.path(results_dir, paste0("p2_pop_run", id, ".csv"))
+    if (!file.exists(p1_pop_file) || !file.exists(p2_pop_file)) next  # only checkpointed runs kept both files
+
+    p1_ids <- fread(p1_pop_file, select="microdata_id")[[1]]
+    p2_ids <- fread(p2_pop_file, select="microdata_id")[[1]]
+    p1_freq <- table(as.character(p1_ids))
+    p2_freq <- table(as.character(p2_ids))
+    idx1 <- match(names(p1_freq), rownames(p1_lookup_mat))
+    idx2 <- match(names(p2_freq), rownames(p2_lookup_mat))
+    counts1 <- as.numeric(p1_freq)
+    counts2 <- as.numeric(p2_freq)
+
+    for (pfx in hh_level_prefixes) {
+      cats <- hh_level_cols[grepl(paste0("^", pfx, "%"), hh_level_cols)]
+
+      for (col_name in cats) {
+        cat_label <- sub("^.*%", "", col_name)
+        mask1 <- p1_lookup_mat[idx1, col_name] == 1
+        mask2 <- p2_lookup_mat[idx2, col_name] == 1
+
+        # overall (unstratified) prevalence within this household type, for reference
+        p1_overall <- prevalence_weighted(p1_lookup_mat, idx1[mask1], counts1[mask1], dis_cols_all[grepl("_dis1$", dis_cols_all)], dis_cols_all[grepl("_dis0$", dis_cols_all)])
+        p2_overall <- prevalence_weighted(p2_lookup_mat, idx2[mask2], counts2[mask2], dis_cols_all[grepl("_dis1$", dis_cols_all)], dis_cols_all[grepl("_dis0$", dis_cols_all)])
+
+        results[[length(results)+1]] <- data.table(
+          run=id, variable=pfx, category=cat_label, age_band="ALL",
+          p1_prevalence=p1_overall$prevalence, p2_prevalence=p2_overall$prevalence
+        )
+
+        # age-band-stratified prevalence within this household type
+        for (a in age_bands) {
+          d1 <- dis_cols_all[grepl(paste0("_", a, "_dis1$"), dis_cols_all)]
+          d0 <- dis_cols_all[grepl(paste0("_", a, "_dis0$"), dis_cols_all)]
+
+          p1_stat <- prevalence_weighted(p1_lookup_mat, idx1[mask1], counts1[mask1], d1, d0)
+          p2_stat <- prevalence_weighted(p2_lookup_mat, idx2[mask2], counts2[mask2], d1, d0)
+
+          results[[length(results)+1]] <- data.table(
+            run=id, variable=pfx, category=cat_label, age_band=a,
+            p1_prevalence=p1_stat$prevalence, p2_prevalence=p2_stat$prevalence
+          )
+        }
+      }
+    }
+  }
+
+  all_results <- rbindlist(results)
+
+  # average across runs
+  avg <- all_results[, .(
+    p1_prevalence = mean(p1_prevalence, na.rm=TRUE),
+    p2_prevalence = mean(p2_prevalence, na.rm=TRUE),
+    n_runs = sum(!is.na(p1_prevalence))
+  ), by = .(variable, category, age_band)]
+
+  avg[, age_band := factor(age_band, levels = c("ALL", age_bands))]
+  setorder(avg, variable, category, age_band)
+
+  print(avg)
+  fwrite(avg, file.path(results_dir, "hh_type_disability_by_age_avg.csv"))
+```
+
+```{r dated - figures}
+# Figures
+  # 1. Diverging bar chart
+    remove.packages("rlang")
+    install.packages("rlang")
+    library(rlang)
+    library(ggplot2)
+    library(dplyr)
+    library(forcats)
+
+    # ========================================
+    # LOAD DATA
+    # ========================================
+    setwd("C:/Users/Jamie/Documents/compass/results_new")
+    df <- read.csv("l1_hh_vars_disability_avg.csv", check.names = FALSE)
+
+    # Build a readable label combining variable + category, e.g.
+    # "hh_type: couple_married_civil_with_children"
+    df <- df %>%
+      mutate(
+        label = paste0(category, "  (", variable, ")"),
+        direction = ifelse(p2_minus_p1 >= 0, "P2 higher", "P2 lower")
+      )
+
+    # Order bars by effect size within the chart (largest positive at top,
+    # most negative at bottom) — comment out fct_reorder if you'd rather
+    # keep variable-grouped order instead
+    df <- df %>%
+      mutate(label = fct_reorder(label, p2_minus_p1))
+
+    # ========================================
+    # PLOT
+    # ========================================
+
+    p <- ggplot(df, aes(x = p2_minus_p1, y = label, fill = direction)) +
+      geom_col(width = 0.65) +
+      geom_errorbarh(
+        aes(xmin = p2_minus_p1_ci_low, xmax = p2_minus_p1_ci_high),
+        height = 0.2, color = "grey30", linewidth = 0.4
+      ) +
+      geom_vline(xintercept = 0, color = "grey40", linewidth = 0.5) +
+      scale_fill_manual(values = c("P2 higher" = "#d6604d", "P2 lower" = "#4393c3")) +
+      facet_grid(variable ~ ., scales = "free_y", space = "free_y", switch = "y") +
+      labs(
+        title = "Disability prevalence: P2 minus P1, by household variable",
+        subtitle = "Points show mean difference across runs; bars show 95% CI",
+        x = "P2 \u2212 P1 (percentage points, as a proportion)",
+        y = NULL,
+        fill = NULL
+      ) +
+      theme_minimal(base_size = 12) +
+      theme(
+        strip.placement = "outside",
+        strip.text.y.left = element_text(angle = 0, face = "bold"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "top",
+        plot.title = element_text(face = "bold")
+      )
+
+    print(p)
+
+    # ========================================
+    # SAVE
+    # ========================================
+
+    ggsave("diverging_bar_p2_minus_p1.png", p, width = 9, height = 6, dpi = 300)
+
+  # 2. ??
+
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+
+  # ========================================
+  # LOAD DATA
+  # ========================================
+
+  df <- read.csv("l1_hh_vars_disability_avg.csv", check.names = FALSE)
+
+  # ========================================
+  # ORDERING
+  # ========================================
+
+  # Keep variables in the order they first appear in the sheet (not alphabetical)
+  df <- df %>%
+    mutate(variable = factor(variable, levels = unique(variable)))
+
+  # Within each variable, sort categories by effect size (p2_minus_p1),
+  # smallest at the bottom / largest at the top when plotted
+  df <- df %>%
+    arrange(variable, p2_minus_p1) %>%
+    mutate(label = paste0(category, "  (", variable, ")")) %>%
+    mutate(label = factor(label, levels = unique(label)))
+
+  # ========================================
+  # RESHAPE: one row per (category x process) for point + CI plotting
+  # ========================================
+
+  df_long <- df %>%
+    select(variable, label,
+          p1_prevalence, p1_ci_low, p1_ci_high,
+          p2_prevalence, p2_ci_low, p2_ci_high) %>%
+    pivot_longer(
+      cols = c(p1_prevalence, p2_prevalence),
+      names_to = "process", values_to = "prevalence"
+    ) %>%
+    mutate(
+      ci_low  = if_else(process == "p1_prevalence", p1_ci_low, p2_ci_low),
+      ci_high = if_else(process == "p1_prevalence", p1_ci_high, p2_ci_high),
+      process = if_else(process == "p1_prevalence", "P1", "P2")
+    ) %>%
+    select(variable, label, process, prevalence, ci_low, ci_high)
+
+  # ========================================
+  # PLOT
+  # ========================================
+
+  p <- ggplot() +
+    # connecting line between P1 and P2 estimates, per category
+    geom_segment(
+      data = df,
+      aes(x = p1_prevalence, xend = p2_prevalence, y = label, yend = label),
+      color = "grey60", linewidth = 0.6
+    ) +
+    # CI error bars for each point
+    geom_errorbarh(
+      data = df_long,
+      aes(xmin = ci_low, xmax = ci_high, y = label, color = process),
+      height = 0.15, linewidth = 0.5, alpha = 0.8
+    ) +
+    # the estimates themselves
+    geom_point(
+      data = df_long,
+      aes(x = prevalence, y = label, color = process),
+      size = 3
+    ) +
+    scale_color_manual(values = c("P1" = "#3182bd", "P2" = "#e6550d")) +
+    facet_grid(variable ~ ., scales = "free_y", space = "free_y", switch = "y") +
+    labs(
+      title = "Disability prevalence estimates: P1 vs P2",
+      subtitle = "Points show mean estimate across runs",
+      x = "Prevalence",
+      y = NULL,
+      color = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      strip.placement = "outside",
+      strip.text.y.left = element_text(angle = 0, face = "bold"),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "top",
+      plot.title = element_text(face = "bold")
+    )
+
+  print(p)
+
+  # ========================================
+  # SAVE
+  # ========================================
+
+  ggsave("dumbbell_p1_vs_p2.png", p, width = 9, height = 6, dpi = 300)
+
+  # Individual vars x disability 
+
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+
+  # ========================================
+  # LOAD DATA
+  # ========================================
+
+  df <- read.csv("l1_ind_vars_disability_avg.csv", check.names = FALSE)
+
+  # ========================================
+  # ORDERING
+  # ========================================
+
+  # Keep variables in the order they first appear in the sheet (not alphabetical)
+  df <- df %>%
+    mutate(variable = factor(variable, levels = unique(variable)))
+
+  # Within each variable, sort categories by effect size (p2_minus_p1),
+  # smallest at the bottom / largest at the top when plotted
+  df <- df %>%
+    arrange(variable, p2_minus_p1) %>%
+    mutate(label = paste0(category, "  (", variable, ")")) %>%
+    mutate(label = factor(label, levels = unique(label)))
+
+  # ========================================
+  # RESHAPE: one row per (category x process) for point + CI plotting
+  # ========================================
+  # Note: census has no CI in this dataset, so it gets NA ci_low/ci_high
+  # and geom_errorbarh will simply skip drawing a bar for those rows.
+
+  df_long <- df %>%
+    select(variable, label,
+          census_prevalence,
+          p1_prevalence, p1_ci_low, p1_ci_high,
+          p2_prevalence, p2_ci_low, p2_ci_high) %>%
+    pivot_longer(
+      cols = c(census_prevalence, p1_prevalence, p2_prevalence),
+      names_to = "process", values_to = "prevalence"
+    ) %>%
+    mutate(
+      ci_low  = case_when(
+        process == "p1_prevalence" ~ p1_ci_low,
+        process == "p2_prevalence" ~ p2_ci_low,
+        TRUE ~ NA_real_
+      ),
+      ci_high = case_when(
+        process == "p1_prevalence" ~ p1_ci_high,
+        process == "p2_prevalence" ~ p2_ci_high,
+        TRUE ~ NA_real_
+      ),
+      process = case_when(
+        process == "census_prevalence" ~ "Census",
+        process == "p1_prevalence" ~ "P1",
+        process == "p2_prevalence" ~ "P2"
+      ),
+      process = factor(process, levels = c("Census", "P1", "P2"))
+    ) %>%
+    select(variable, label, process, prevalence, ci_low, ci_high)
+
+  # ========================================
+  # CONNECTING SEGMENTS: span min-to-max of the three estimates per category
+  # ========================================
+
+  df_segments <- df %>%
+    rowwise() %>%
+    mutate(
+      x_min = min(census_prevalence, p1_prevalence, p2_prevalence),
+      x_max = max(census_prevalence, p1_prevalence, p2_prevalence)
+    ) %>%
+    ungroup()
+
+  # ========================================
+  # PLOT
+  # ========================================
+
+  p <- ggplot() +
+    # connecting line spanning the full range of the three estimates, per category
+    geom_segment(
+      data = df_segments,
+      aes(x = x_min, xend = x_max, y = label, yend = label),
+      color = "grey60", linewidth = 0.6
+    ) +
+    # CI error bars (only drawn for P1 / P2, since census has no CI here)
+    geom_errorbarh(
+      data = df_long,
+      aes(xmin = ci_low, xmax = ci_high, y = label, color = process),
+      height = 0.15, linewidth = 0.5, alpha = 0.8, na.rm = TRUE
+    ) +
+    # the estimates themselves
+    geom_point(
+      data = df_long,
+      aes(x = prevalence, y = label, color = process),
+      size = 3
+    ) +
+    scale_color_manual(values = c("Census" = "#31a354", "P1" = "#3182bd", "P2" = "#e6550d")) +
+    facet_grid(variable ~ ., scales = "free_y", space = "free_y", switch = "y") +
+    labs(
+      title = "Disability prevalence estimates: Census vs P1 vs P2",
+      subtitle = "Points show mean estimate across runs",
+      x = "Prevalence",
+      y = NULL,
+      color = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      strip.placement = "outside",
+      strip.text.y.left = element_text(angle = 0, face = "bold"),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "top",
+      plot.title = element_text(face = "bold")
+    )
+
+  print(p)
+
+  # ========================================
+  # SAVE
+  # ========================================
+
+  ggsave("dumbbell_census_p1_p2.png", p, width = 9, height = 6, dpi = 300)
+
+
+```
+
+```{r dated - fit check}
+# Fit check
+  # ========================================
+  # COMPARE DISABILITY CONSTRAINT FIT VS OTHER CONSTRAINTS
+  # Run this after the main loop (or load from state_file / saved CSVs)
+  # ========================================
+
+  library(dplyr)
+  setwd("C:/Users/Jamie/Documents/compass")
+  # ----------------------------------------
+  # OPTION A: if variable_results is still in memory (list of per-run data.frames)
+  # ----------------------------------------
+  # variable_all <- do.call(rbind, variable_results)
+
+  # ----------------------------------------
+  # OPTION B: reload from the checkpoint state file
+  # ----------------------------------------
+  results_dir <- "results_new"
+  state_file <- file.path(results_dir, "analysis_state.RData")
+  load(state_file)   # brings back variable_results among others
+
+  variable_all <- do.call(rbind, variable_results)
+
+  # ========================================
+  # AGGREGATE ACROSS RUNS, PER VARIABLE
+  # variable_results already stores summed squared/abs errors and n per run,
+  # per variable (from the `aggregate(... ~ variable_p1, ...)` step in the main loop).
+  # We sum those sums across all runs, then divide once — i.e. this is itself
+  # an absolute-number aggregation, not a mean-of-means, so it's consistent
+  # with how the marginal prevalence figures were built.
+  # ========================================
+
+  variable_fit <- variable_all %>%
+    group_by(variable) %>%
+    summarise(
+      n_runs = n_distinct(run),
+      p1_census_mse   = sum(p1_minus_census_squared_sum, na.rm=TRUE) / sum(p1_minus_census_squared_n, na.rm=TRUE),
+      p1_census_mae   = sum(p1_minus_census_abs_sum,     na.rm=TRUE) / sum(p1_minus_census_abs_n,     na.rm=TRUE),
+      p2_census_mse   = sum(p2_minus_census_squared_sum, na.rm=TRUE) / sum(p2_minus_census_squared_n, na.rm=TRUE),
+      p2_census_mae   = sum(p2_minus_census_abs_sum,     na.rm=TRUE) / sum(p2_minus_census_abs_n,     na.rm=TRUE),
+      p2_p1_mse       = sum(p2_minus_p1_squared_sum,     na.rm=TRUE) / sum(p2_minus_p1_squared_n,     na.rm=TRUE),
+      p2_p1_mae       = sum(p2_minus_p1_abs_sum,         na.rm=TRUE) / sum(p2_minus_p1_abs_n,         na.rm=TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(p1_census_mae))
+
+  # ========================================
+  # FLAG DISABILITY VARIABLES SPECIFICALLY
+  # ========================================
+
+  variable_fit <- variable_fit %>%
+    mutate(is_disability = grepl("^ind_sex_age_dis", variable))
+
+  # ========================================
+  # RANKING — where does disability sit relative to everything else?
+  # ========================================
+
+  variable_fit <- variable_fit %>%
+    mutate(
+      rank_p1_census_mae = rank(-p1_census_mae),
+      rank_p2_census_mae = rank(-p2_census_mae)
+    )
+
+  cat("\n========================================\n")
+  cat("PER-VARIABLE FIT, RANKED BY P1-vs-CENSUS MAE (worst first)\n")
+  cat("========================================\n")
+  print(variable_fit, n = nrow(variable_fit))
+
+  cat("\n========================================\n")
+  cat("DISABILITY VARIABLES ONLY\n")
+  cat("========================================\n")
+  print(variable_fit %>% filter(is_disability), n = Inf)
+
+  cat("\n========================================\n")
+  cat("SUMMARY: DISABILITY VS ALL OTHER (non-disability) VARIABLES\n")
+  cat("========================================\n")
+
+  summary_by_group <- variable_fit %>%
+    group_by(is_disability) %>%
+    summarise(
+      n_vars = n(),
+      mean_p1_census_mae = mean(p1_census_mae, na.rm=TRUE),
+      mean_p2_census_mae = mean(p2_census_mae, na.rm=TRUE),
+      mean_p2_p1_mae     = mean(p2_p1_mae, na.rm=TRUE),
+      median_rank_p1_census_mae = median(rank_p1_census_mae, na.rm=TRUE),
+      .groups = "drop"
+    )
+
+  print(summary_by_group)
+
+  # ========================================
+  # SAVE
+  # ========================================
+
+  write.csv(variable_fit, file.path(results_dir, "variable_fit_comparison.csv"), row.names = FALSE)
+
+  cat("\nSaved: ", file.path(results_dir, "variable_fit_comparison.csv"), "\n", sep="")
+  cat("\nInterpretation guide:\n")
+  cat("- If disability's rank_p1_census_mae is near the TOP (i.e. among the worst-fitting\n")
+  cat("  variables) relative to other constraints, that points toward an algorithm-fit or\n")
+  cat("  constraint-competition explanation (disability is being under-prioritized by the\n")
+  cat("  optimizer relative to other simultaneously-fitted constraints).\n")
+  cat("- If disability's fit is unremarkable relative to other variables, but the MARGINAL\n")
+  cat("  prevalence gap is still large, that points more toward a category-definition /\n")
+  cat("  specification issue (e.g. a mismatch in how dis1/dis0 categories are defined\n")
+  cat("  or interact with age/sex bands between constraints and microdata) rather than\n")
+  cat("  a general algorithm underperformance issue.\n")
+
+```

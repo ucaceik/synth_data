@@ -1,0 +1,2396 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+getwd()
+setwd("C:/Users/Jamie/Documents/compass")
+```
+
+```{r extract disability vars from US individuals level}
+# Sorting US England Data including disability  
+
+    #  Note: The data file produced will be at the individual level and cover all ages, irrespective of the variables requested. */
+
+
+        # Sample Code for your request:  49273f34301f49f08c202efda20e346c
+        # ******************************************************************************
+
+        rm(list=ls())
+
+
+
+
+        # Replace "where" with the filepath of the working folder (where any temporary files created by this programme will be stored)   eg:  c:\ukhls\temp
+        setwd("C:/Users/Jamie/Documents/compass")
+
+        # install.packages("readr")  # only need this once
+        library(readr)
+
+        # Replace "where" with the folderpath where the data has been downloaded and unzipped
+        # eg: c:/ukhls_data/UKDA-6614-stata/stata/stata13_se/ukhls
+        ukhls <- "C:/Users/Jamie/Documents/compass/Input/Survey/"
+
+        # Replace "where" with the folderpath where the nurse data has been downloaded and unzipped
+        # eg: c:/ukhls_data/UKDA-7261-stata/stata/stata13_se/
+        # ukhls_nurse <- "where/UKDA-7261-stata/stata/stata13_se/"
+
+        # Replace "where" with the filepath of the folder where you want to store the final dataset produced by this programme.
+        # eg: c:/ukhls/results
+        outputpath <- "C:/Users/Jamie/Documents/compass/data/England"
+
+        # The file produced by this programme will be named as below. If you want to change the name do it here.
+        outputfilename <- "UKHLS_wide_j"
+
+        # By default the data will be extracted from the waves whose letter prefixes are written below, and merged. If you want to a different selection of waves, make the change here
+        allWaves <- c("j") # latest wave only
+
+        # These variables from the indall files will be included. These include some key variables as determined by us PLUS any variables requested by you.
+        indallvars <- c("age_dv chdisdifb1 chdisdifb10 chdisdifb11 chdisdifb12 chdisdifb2 chdisdifb3 chdisdifb4 chdisdifb5 chdisdifb6 chdisdifb7 chdisdifb8 chdisdifb9 chdisdifb96 chhealth2 country ethn_dv ff_ivlolw gor_dv hhsize hidp iviolw mastat_dv nchild_dv pidp pno psnen01_lw psnen01_xw psnen91_lw psnen91_xw psnen99_lw psnen99_xw psneng2_lw psneng2_xw psnenub_lw psnenub_xw psnenui_lw psnenui_xw psnenus_lw psnenus_xw psu racel_dv sex_dv strata urban_dv")
+
+        # These variables from the indresp files will be included. These include some key variables as determined by us PLUS any variables requested by you.
+        indvars <- c("age_dv country disdif1 disdif10 disdif11 disdif12 disdif2 disdif3 disdif4 disdif5 disdif6 disdif7 disdif8 disdif9 disdif96 ethn_dv ff_emplw ff_ivlolw ffbrfedlw ftexw gor_dv health hhsize hhtype_dv hidp hldsbl1 ind5mus_lw ind5mus_xw indbd91_lw indbdub_lw indin01_lw indin01_xw indin91_lw indin91_xw indin99_lw indin99_xw inding2_lw inding2_xw indinub_lw indinub_xw indinui_lw indinui_xw indinus_lw indinus_xw indns91_lw indnsub_lw indpxg2_xw indpxub_lw indpxub_xw indpxui_lw indpxui_xw indpxus_lw indpxus_xw indscg2_xw indscub_lw indscub_xw indscui_lw indscui_xw indscus_lw indscus_xw iviolw jbstat mastat_dv nbornlw nchild_dv pidp pno psu racel_dv sex_dv strata tenure_dv ukborn urban_dv")
+
+        # These variables from the child files will be included. These include some key variables as determined by us PLUS any variables requested by you.
+        chvars <- c("age_dv chddvg2_xw chddvub_lw chddvub_xw chddvui_lw chddvui_xw country gor_dv hhsize hidp iviolw pidp pno psnen01_lw psnen91_lw psneng2_lw psneng2_xw psnenub_lw psnenub_xw psnenui_lw psnenui_xw psnenus_lw psnenus_xw psu send sex_dv strata urban_dv")
+
+        # These variables from the hhresp files will be included. These include some key variables as determined by us PLUS any variables requested by you.
+        hhvars <- c("country fihhmnnet1_dv gor_dv hhden01_xw hhden91_xw hhden99_xw hhdeng2_xw hhdenub_xw hhdenui_xw hhdenus_xw hhsize hhtype_dv hidp hsivlw ieqmoecd_dv nkids_dv psu strata tenure_dv urban_dv xpgaslw xpleclw")
+
+        # # These variables from the youth files will be included. These include some key variables as determined by us PLUS any variables requested by you.
+        youthvars <- c("age_dv country ethn_dv gor_dv hidp pidp pno psu racel_dv sex_dv strata urban_dv ypltdis ypsmlw ypwklw ythscg2_xw ythscub_xw ythscui_xw ythscus_xw")
+
+        # # These variables from the nurse labblood file will be included. These include some key variables as determined by us PLUS any variables requested by you. 
+        # xlabbloodvars  <- c("")
+
+        # # These variables from the nurse epigenetic clocks file will be included. These include some key variables as determined by us PLUS any variables requested by you. 
+        # xepigenclockvars <- c("")
+
+        # # These variables from the nurse proteomic file will be included. These include some key variables as determined by us PLUS any variables requested by you. 
+        # xproteovars <- c("")
+        # /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        # // Anything below this line should not be changed! Any changes to the selection of variables and waves, and location of folders, should be made above. //
+        # /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        # Function to check if a package is installed and install it if necessary
+            check_and_install <- function(package) {
+            if (!require(package, character.only = TRUE)) {
+                install.packages(package, dependencies = TRUE, type = "binary")
+                if (!require(package, character.only = TRUE)) {
+                install.packages(package, dependencies = TRUE, type = "source", INSTALL_opts = "--no-multiarch")
+                library(package, character.only = TRUE)
+                }
+            }
+            }
+            
+            # Check and install necessary packages
+            check_and_install("haven")
+            check_and_install("dplyr")
+            check_and_install("tidyr")
+            check_and_install("foreach")
+
+        #  // this program returns all variable names with the wave prefix
+            getVars <- function(arg1, arg2) {
+            if (arg2== "") {
+                wavemyvars <- arg1
+            } else if (arg1 != "" & !is.null(arg2)) {
+                # Split the string into separate elements
+                wavemyvar <- strsplit(arg1, " ")[[1]]
+                # Add the prefix "*_" to each element
+                wavemyvar_prefix <- paste0(arg2,"_", wavemyvar)  
+                # Concatenate the elements back into a single string
+                wavemyvars <- paste(wavemyvar_prefix, collapse = " ")
+            }  else {
+                wavemyvars <- ""
+            }
+            return(wavemyvars)
+            }
+
+        # // this program to returns  which variables exist in this wave
+            getExistingVars <- function(vars, df) {
+            existingVars <- c()
+            for (var in vars) {
+                if (var %in% colnames(df)) {
+                existingVars <- c(existingVars, var)
+                }
+            }
+            return(existingVars)
+            }
+
+        # Split the wave string into individual letters
+            allWaves <- strsplit(allWaves, " ")[[1]]
+
+        # Loop through each wave
+            for (wave in allWaves) {
+            # Find the wave number (letter corresponding to the wave)
+            waveno <- which(strsplit("abcdefghijklmnopqrstuvwxyz", "")[[1]] == wave)
+            
+            # find the wave household vars  
+            wavehhvars <- getVars(hhvars, wave)
+            
+            # find the wave individual vars
+            waveindvars <- getVars(indvars, wave)
+            
+            # find the wave all individual vars
+            waveindallvars <- getVars(indallvars, wave)
+            
+            # find the wave child vars
+            wavechvars <- getVars(chvars, wave)
+            
+            # find the wave youth vars
+            waveyouthvars <- getVars(youthvars, wave)
+            
+            # open the the household level file with the required variable
+            hhresp_dat <- read_tsv(paste0(ukhls, "/", wave, "_hhresp.tab"))
+            
+            vars_to_check <- c(paste0(wave, "_hidp"), wavehhvars)
+            vars_to_check <- unlist(strsplit(vars_to_check, " "))
+            
+            # get the existing variables using the getExistingVars function
+            existingVars <- getExistingVars(vars_to_check, hhresp_dat)
+            
+            # keep only the existing variables in the data frame
+            df_hhresp <- hhresp_dat %>% select(all_of(existingVars))
+        
+            # check if individual, child, or youth variables are required
+            if (!is.null(indvars) || !is.null(chvars) || !is.null(youthvars)) {
+                # if any individual variable is required, first merge INDALL keeping the pidp
+                indall_data <- right_join(df_hhresp, read_tsv(paste0(ukhls, "/", wave, "_indall.tab")), by = paste0(wave, "_hidp"))
+    
+                    cat("After indall merge:\n")
+                    print(table(indall_data$j_age_dv[indall_data$j_age_dv < 16]))
+
+                # drop rows where pidp is missing (loose households with no individuals)
+                indall_data <- indall_data[!is.na(indall_data$pidp), ]
+                
+                # get the existing variables using the getExistingVars function
+                vars_to_check <- c("pidp", paste0(wave, "_hidp"), wavehhvars, waveindallvars)
+                vars_to_check <- unlist(strsplit(vars_to_check, " "))
+                existingVars <- getExistingVars(vars_to_check, indall_data)
+                
+                # keep only the existing variables in the data frame
+                df_alldata <- indall_data %>% select(all_of(existingVars))
+                
+                # add any requested individual variables
+                if (!is.null(indvars)){
+                # Remove the duplicate variable from df_indresp before merging to avoid any suffix being added
+                df_indresp <- read_tsv(paste0(ukhls, "/", wave, "_indresp.tab"))
+                df_indresp <- df_indresp[ , !names(df_indresp) %in% names(df_alldata) | names(df_indresp) == "pidp"]
+                
+                indvars_dat <- merge(df_alldata, df_indresp, by = "pidp", all = TRUE)
+
+                    cat("After indresp merge:\n")
+                    print(table(indvars_dat$j_age_dv[indvars_dat$j_age_dv < 16]))
+                
+                # get the existing variables using the getExistingVars function
+                vars_to_check <- c("pidp", paste0(wave, "_hidp"), wavehhvars, waveindvars, waveyouthvars, wavechvars, waveindallvars)
+                vars_to_check <- unlist(strsplit(vars_to_check, " "))
+                existingVars <- getExistingVars(vars_to_check, indvars_dat)
+                
+                # keep only the existing variables in the data frame
+                df_alldata <- indvars_dat %>% select(all_of(existingVars))
+                }
+            
+            # add any requested youth variables
+                if (!is.null(waveyouthvars)){
+                # remove the duplicate variable from df_youth before merging to avoid any suffix being added
+                df_youth <- read_tsv(paste0(ukhls, "/", wave, "_youth.tab"))
+                df_youth <- df_youth[ , !names(df_youth) %in% names(df_alldata) | names(df_youth) == "pidp"]
+                
+                youth_dat <- merge(df_alldata, df_youth, by = "pidp", all = TRUE)
+
+                cat("After youth merge:\n")
+                    print(table(youth_dat$j_age_dv[youth_dat$j_age_dv < 16]))
+                
+                # get the existing variables using the getExistingVars function
+                vars_to_check <- c("pidp", paste0( wave, "_hidp"), wavehhvars, waveindvars, waveyouthvars, wavechvars, waveindallvars)
+                vars_to_check <- unlist(strsplit(vars_to_check, " "))
+                existingVars <- getExistingVars(vars_to_check, youth_dat)
+                
+                # keep only the existing variables in the data frame
+                df_alldata <- youth_dat %>% select(all_of(existingVars))
+                }
+            
+            # add any requested child variables
+                if (!is.null(wavechvars)){
+                df_child <- read_tsv(paste0(ukhls, "/", wave, "_child.tab"))
+                df_child <- df_child[ , !names(df_child) %in% names(df_alldata) | names(df_child) == "pidp"]
+                child_dat <- merge(df_alldata, df_child, by = "pidp", all = TRUE)
+                    
+                    cat("After child merge:\n")
+                    print(table(child_dat$j_age_dv[child_dat$j_age_dv < 16]))
+            # Get the existing variables using the getExistingVars function
+                vars_to_check <- c("pidp", paste0(wave, "_hidp"), wavehhvars, waveindvars, waveyouthvars, wavechvars, waveindallvars)
+                existingVars <- getExistingVars(unlist(strsplit(vars_to_check, " ")), child_dat)
+                
+                # Keep only the existing variables in the data frame
+                df_alldata <- child_dat %>% select(all_of(existingVars))
+                }
+            }	
+            cat("Final df_alldata before save:\n")
+            print(table(df_alldata$j_age_dv[df_alldata$j_age_dv < 16]))
+        # Save the file that was created
+            saveRDS(df_alldata, file = paste0("temp_", wave, ".rds"))
+
+            }
+
+    df_wavedat <- readRDS(paste0("temp_", wave, ".rds"))
+    cat("After readRDS:\n")
+    print(table(df_wavedat$j_age_dv[df_wavedat$j_age_dv < 16]))
+
+        # Initialize an empty dataframe to store the merged data
+        df_merged <- NULL
+
+        
+        # Loop through each wave
+        for (wave in allWaves) {
+            # Read the RDS file for the current wave
+            df_wavedat <- readRDS(paste0("temp_", wave, ".rds"))
+            
+            # Perform a left join with the merged_data dataframe
+            if (is.null(df_merged)) {
+            df_merged <- df_wavedat
+            } else {
+            df_merged <- merge(df_merged, df_wavedat, by = "pidp", all = TRUE)
+            }
+        }
+        
+        # Move pidp to the beginning of the file
+        df_widedata <- df_merged[order(df_merged$pidp), ]
+        # Merge wave-independent nurse/lab data AFTER combining waves
+        # df_widedata <- merge(df_widedata, df_allnurse, by = "pidp", all = TRUE)
+        df_wide <- df_widedata[order(df_widedata$pidp), ]
+
+        # save the long file
+        saveRDS(df_wide, file = paste0(outputpath, "/", outputfilename, ".rds"))
+        # saveRDS(df_widedata, file = paste0(outputpath, "/", outputfilename, ".rds"))
+
+        # Erase temporary files
+            for (wave in allWaves) {
+                file.remove(paste0("temp_", wave, ".rds"))
+            }
+
+
+```
+```{r set up that works?}
+rm(list = ls())
+
+# ---- Settings -------------------------------------------------------------------------
+setwd("C:/Users/Jamie/Documents/compass")
+
+# Folder with the UKHLS .tab files (no trailing slash needed)
+ukhls      <- "C:/Users/Jamie/Documents/compass/Input/Survey"
+outputpath <- "C:/Users/Jamie/Documents/compass/data/England"
+outputfilename <- "UKHLS_wide_j"
+
+# Waves to extract (letters, separated by spaces). NB: the main pipeline uses wave "n".
+allWaves <- "j"
+
+# Variables to keep from each file (without wave prefix)
+indallvars <- "age_dv chdisdifb1 chdisdifb10 chdisdifb11 chdisdifb12 chdisdifb2 chdisdifb3 chdisdifb4 chdisdifb5 chdisdifb6 chdisdifb7 chdisdifb8 chdisdifb9 chdisdifb96 chhealth2 country ethn_dv ff_ivlolw gor_dv hhsize hidp iviolw mastat_dv nchild_dv pidp pno psnen01_lw psnen01_xw psnen91_lw psnen91_xw psnen99_lw psnen99_xw psneng2_lw psneng2_xw psnenub_lw psnenub_xw psnenui_lw psnenui_xw psnenus_lw psnenus_xw psu racel_dv sex_dv strata urban_dv"
+
+indvars <- "age_dv country disdif1 disdif10 disdif11 disdif12 disdif2 disdif3 disdif4 disdif5 disdif6 disdif7 disdif8 disdif9 disdif96 ethn_dv ff_emplw ff_ivlolw ffbrfedlw ftexw gor_dv health hhsize hhtype_dv hidp hldsbl1 ind5mus_lw ind5mus_xw indbd91_lw indbdub_lw indin01_lw indin01_xw indin91_lw indin91_xw indin99_lw indin99_xw inding2_lw inding2_xw indinub_lw indinub_xw indinui_lw indinui_xw indinus_lw indinus_xw indns91_lw indnsub_lw indpxg2_xw indpxub_lw indpxub_xw indpxui_lw indpxui_xw indpxus_lw indpxus_xw indscg2_xw indscub_lw indscub_xw indscui_lw indscui_xw indscus_lw indscus_xw iviolw jbstat mastat_dv nbornlw nchild_dv pidp pno psu racel_dv sex_dv strata tenure_dv ukborn urban_dv"
+
+# cddis added so parent-reported child disability comes through alongside ypltdis
+chvars <- "age_dv cddis chddvg2_xw chddvub_lw chddvub_xw chddvui_lw chddvui_xw country gor_dv hhsize hidp iviolw pidp pno psnen01_lw psnen91_lw psneng2_lw psneng2_xw psnenub_lw psnenub_xw psnenui_lw psnenui_xw psnenus_lw psnenus_xw psu send sex_dv strata urban_dv"
+
+hhvars <- "country fihhmnnet1_dv gor_dv hhden01_xw hhden91_xw hhden99_xw hhdeng2_xw hhdenub_xw hhdenui_xw hhdenus_xw hhsize hhtype_dv hidp hsivlw ieqmoecd_dv nkids_dv psu strata tenure_dv urban_dv xpgaslw xpleclw"
+
+youthvars <- "age_dv country ethn_dv gor_dv hidp pidp pno psu racel_dv sex_dv strata urban_dv ypltdis ypsmlw ypwklw ythscg2_xw ythscub_xw ythscui_xw ythscus_xw"
+
+# ---- Packages ------------------------------------------------------------------------
+for (p in c("readr", "dplyr")) {
+  if (!requireNamespace(p, quietly = TRUE)) install.packages(p)
+  library(p, character.only = TRUE)
+}
+
+# ---- Helpers -------------------------------------------------------------------------
+# Add the wave prefix to each variable, except pidp (which has no prefix)
+getVars <- function(vars, wave) {
+  v <- strsplit(vars, " ")[[1]]
+  ifelse(v == "pidp", "pidp", paste0(wave, "_", v))
+}
+
+# Read one UKHLS file for a wave
+readWave <- function(wave, file) {
+  read_tsv(file.path(ukhls, paste0(wave, "_", file, ".tab")), show_col_types = FALSE)
+}
+
+# Drop columns already in `base` (except the merge keys) so merges don't create .x / .y suffixes
+dropOverlap <- function(df, base, keys) {
+  df[, !(names(df) %in% names(base)) | names(df) %in% keys, drop = FALSE]
+}
+
+# Debug: count of under-16s by age at each step
+checkKids <- function(df, wave, label) {
+  a <- df[[paste0(wave, "_age_dv")]]
+  cat("\n", label, ": under-16s by age\n", sep = "")
+  print(table(a[!is.na(a) & a >= 0 & a < 16]))
+}
+
+# ---- Extract each wave ---------------------------------------------------------------
+allWaves <- strsplit(allWaves, " ")[[1]]
+
+for (wave in allWaves) {
+  hidp <- paste0(wave, "_hidp")
+  keep <- unique(c("pidp", hidp,
+                   getVars(hhvars, wave), getVars(indallvars, wave), getVars(indvars, wave),
+                   getVars(chvars, wave), getVars(youthvars, wave)))
+
+  # 1. Household file
+  hh <- readWave(wave, "hhresp")
+  hh <- hh[, intersect(c(hidp, getVars(hhvars, wave)), names(hh)), drop = FALSE]
+
+  # 2. indall = spine of everyone in responding households
+  indall <- readWave(wave, "indall")
+  indall <- indall[, intersect(c("pidp", hidp, getVars(indallvars, wave)), names(indall)), drop = FALSE]
+  indall <- dropOverlap(indall, hh, keys = hidp)          # household vars come from hhresp
+  df <- left_join(indall, hh, by = hidp)
+  df <- df[!is.na(df$pidp), ]
+  checkKids(df, wave, "After indall + hhresp")
+
+  # 3. indresp (adults with an interview)
+  indresp <- readWave(wave, "indresp")
+  indresp <- indresp[, intersect(c("pidp", getVars(indvars, wave)), names(indresp)), drop = FALSE]
+  df <- left_join(df, dropOverlap(indresp, df, keys = "pidp"), by = "pidp")
+  checkKids(df, wave, "After indresp")
+
+  # 4. youth (10-15 self-completion)
+  youth <- readWave(wave, "youth")
+  youth <- youth[, intersect(c("pidp", getVars(youthvars, wave)), names(youth)), drop = FALSE]
+  df <- left_join(df, dropOverlap(youth, df, keys = "pidp"), by = "pidp")
+  checkKids(df, wave, "After youth")
+
+  # 5. child (parent-reported, under 16)
+  child <- readWave(wave, "child")
+  child <- child[, intersect(c("pidp", getVars(chvars, wave)), names(child)), drop = FALSE]
+  df <- left_join(df, dropOverlap(child, df, keys = "pidp"), by = "pidp")
+  checkKids(df, wave, "After child")
+
+  # Report any requested variables that weren't found in this wave
+  missing_vars <- setdiff(keep, names(df))
+  if (length(missing_vars)) cat("\nNot found in wave ", wave, ": ", paste(missing_vars, collapse = ", "), "\n", sep = "")
+
+  df <- df[, intersect(keep, names(df)), drop = FALSE]
+  saveRDS(df, file = paste0("temp_", wave, ".rds"))
+}
+
+# ---- Combine waves (wide, one row per person) ---------------------------------------
+df_merged <- NULL
+for (wave in allWaves) {
+  df_wave <- readRDS(paste0("temp_", wave, ".rds"))
+  df_merged <- if (is.null(df_merged)) df_wave else full_join(df_merged, df_wave, by = "pidp")
+}
+
+df_wide <- df_merged[order(df_merged$pidp), c("pidp", setdiff(names(df_merged), "pidp"))]
+saveRDS(df_wide, file = file.path(outputpath, paste0(outputfilename, ".rds")))
+
+# Remove temporary files
+file.remove(paste0("temp_", allWaves, ".rds"))
+
+cat("\nSaved ", nrow(df_wide), " people to ", file.path(outputpath, paste0(outputfilename, ".rds")), "\n", sep = "")
+
+```
+
+```{r recode us_hh, echo=FALSE}
+# Recode us_hh data, including disability
+    ### Meta ###
+        # Author: Andreas Hoehn & Hugh Rice & Ric Colasanti
+        # Version: 0.9
+        # Date:  2026-04-22
+        # About: Re-Code the Understanding Society Survey. The steps for this are;
+        # 1. Define Variables for Inclusion --> comes from different survey response files
+        # 2. Link Response Files --> this is to ensure the full HH structure 
+        # 3. Identify Kinship Structure --> identifying household heads and kinship in HH / save both as separate outputs
+        # 4. Align Categories for Survey Constraint Variables --> match census tables
+        # 5A. Assert No Missing Values in Constraints, Reduce, Save --> for creation
+        # 5B. Imputation of Missing Information --> for validation, demo only
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [1] Define Variables for Inclusion ###
+l_definitions$recode_setup_survey <- TRUE
+if (l_definitions$recode_setup_survey == TRUE) {
+### rest:
+        # initialise an object for variables to keep
+            l_keep_vars   <- list() # for subsetting surveys
+        # set missing l_definition
+            l_definitions$us_wave <- "n"
+        # ----- #
+        
+        # load indall: survey population spine --> starting point for anything
+        dt_indall <- data.table::fread("Input/Survey/n_indall.tab")
+        l_keep_vars[[1L]] <- c("pidp",
+                            "hidp", 
+                            "buno_dv",
+                            "pno",
+                            "sex",
+                            "age_dv"
+                            # "chhealth2" # all -8 (NA); using cddis later on from _child
+                            ) 
+                            
+        dt_indall <- .RenamneFun(dt_in = dt_indall, wv = l_definitions$us_wave)
+        dt_indall <- .SubsetFun(dt_in = dt_indall, l_sub = l_keep_vars, i = 1L)
+            # debugging
+                # list.files("Input/Survey")
+        l_definitions$diag_surv_size_ind_load <- length(unique(dt_indall$pidp))
+
+        # ----- #
+        
+        # load hhresp: hh-level responses
+        dt_hhresp  <- data.table::fread("Input/Survey/n_hhresp.tab")
+        l_keep_vars[[2L]] <- c("hidp",
+                            "gor_dv",         # household identifier; Added n_ as well
+                            "urban_dv",     # urban     
+                            "hhtype_dv",    # household type
+                            "tenure_dv",    # household tenure
+                            "hhsize",       # HH size
+                            "heatch",       # central heated yes/no
+                            "ncars",        # Number of cars in the hh
+                            "hsbeds",       # Number of bedrooms
+                            "hsrooms",      # Number of other rooms (for habitable rooms number)
+                            "hhdeng2_xw")   # Wave 14 Cross-Sectional Weight
+        
+                            # colnames(dt_hhresp)
+                            # grep("n_urban", names(dt_hhresp), value = TRUE)
+        
+        dt_hhresp <- .RenamneFun(dt_in = dt_hhresp, wv = l_definitions$us_wave)
+        dt_hhresp <- .SubsetFun(dt_in = dt_hhresp, l_sub = l_keep_vars, i = 2L)
+        l_definitions$diag_surv_size_hh_load <- length(unique(dt_hhresp$hidp))
+
+        # ----- # 
+        
+        # indresp: Adults, 16y+
+        dt_indresp <- data.table::fread("Input/Survey/n_indresp.tab") # 16y+
+        l_keep_vars[[3L]] <- c("pidp",
+                            "marstat",
+                            "hiqual_dv",
+                            "ethn_dv",
+                            "jbstat",
+                            "jbft_dv",
+                            "scsf1",
+                            "health",
+                            "aidhh",
+                            "naidxhh",
+                            paste0("disdif", 1:12), "disdif96")   
+        dt_indresp <- .RenamneFun(dt_in = dt_indresp, wv = l_definitions$us_wave)
+        dt_indresp <- .SubsetFun(dt_in = dt_indresp, l_sub = l_keep_vars, i = 3L)
+        dt_indresp[, source_indresp := 1L] # for source of individual-level data 
+           
+        # child: all under 16y, parent/proxy respondent
+        dt_child   <- data.table::fread("Input/Survey/n_child.tab")  
+        l_keep_vars[[4L]] <- c("pidp", 
+                                "cddis") # Longstanding health condition
+                                # "chhealth2") 
+
+        dt_child <- .RenamneFun(dt_in = dt_child, wv = l_definitions$us_wave)
+        dt_child <- .SubsetFun(dt_in = dt_child, l_sub = l_keep_vars, i = 4L)
+        dt_child[, source_child := 1L] # for source of individual-level data 
+
+        # ----- # 
+        
+        # youth: additional questions for 10y-15y 
+        dt_youth   <- data.table::fread("Input/Survey/n_youth.tab")  
+        l_keep_vars[[5L]] <- c("pidp",
+                                "ypltdis") # longstanding health conditioni 
+        dt_youth <- .RenamneFun(dt_in = dt_youth, wv = l_definitions$us_wave)
+        dt_youth <- .SubsetFun(dt_in = dt_youth, l_sub = l_keep_vars, i = 5L)
+        dt_youth[, source_youth := 1L] # for source of individual-level data 
+
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+    
+### [2] Link Response Files ### 
+        dt_survey <- merge(x = dt_hhresp, y = dt_indall,  by = "hidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_indresp, by = "pidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_child,   by = "pidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_youth,   by = "pidp", all.x = TRUE)
+        
+        # Replace NAs with 0
+        for (v in c("source_indresp", "source_child", "source_youth"))
+        set(dt_survey, which(is.na(dt_survey[[v]])), v, 0L)
+
+        dt_survey <- merge(x = dt_hhresp, y = dt_indall,  by = "hidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_indresp, by = "pidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_child,   by = "pidp", all.x = TRUE)
+        dt_survey <- merge(x = dt_survey, y = dt_youth,   by = "pidp", all.x = TRUE)
+
+    # Create disability source variable
+        # (unmatched rows from the all.x merges are NA, not 0, so set them to 0 first)
+        for (v in c("source_indresp", "source_child", "source_youth"))
+          set(dt_survey, which(is.na(dt_survey[[v]])), v, 0L)
+
+        dt_survey[, source := "indall_only"]
+        dt_survey[source_indresp == 1L,                         source := "indresp"]
+        dt_survey[source_child   == 1L & source_youth == 1L,    source := "child_youth"]
+        dt_survey[source_child   == 1L & source_youth == 0L,    source := "child_only"]
+        dt_survey[source_child   == 0L & source_youth == 1L,    source := "youth_only"]
+        dt_survey[, c("source_indresp", "source_child", "source_youth") := NULL]
+
+
+    # Create disability variable (ind_disability)
+        dt_survey[, ind_disability := NA_integer_]
+        dt_survey[, dis_source := NA_character_]
+        
+        # For adults (ages 16+)
+            # 1. health var
+                # 'do you have any long-standing phys or mental impairment, illness, or disability?' 
+                # -9 (missing), -2 (refusal), -1 (don't know), 1 (yes), 2 (no) (wild)
+            # 2. disdif(1-12) vars
+                # limitation in 11 activity types 
+                # -9 (missing), -2 (refusal), -1 (don't know), 0 (not mentioned), 1 (mentioned)
+                # disdif12 for 'other', so inclusive beyond the 11 options. 
+            # 3. disdif96 var
+                # 'none of these'
+                # -9 (missing), -2 (refusal), -1 (don't know), 0 (not mentioned), 1 (mentioned)
+
+            # Building it right (not using 'all NOT answering NONE')
+                disdif_cols <- paste0("disdif", 1:12)
+                # 1 if any difficulty is mentioned, 0 if none mentioned, negative = missing/don't know 
+                # flagged as having a disability aliging with EADD (ind_disability == 1) if 'health' == 1 & 'disdif#'' == 1
+                dt_survey[, any_difficulty := as.integer(rowSums(.SD == 1, na.rm = TRUE) > 0), .SDcols = disdif_cols]
+                dt_survey[health == 1 & any_difficulty == 1, `:=`(ind_disability = 1L, dis_source = "health_disdif")] # responds yes to health condition and yes to limitations 
+                dt_survey[health == 2 | (health == 1 & any_difficulty == 0), `:=`(ind_disability = 0L, dis_source = "health_disdif")] # responds no to health condition, or yes to health condition but no to limitations
+        
+        # For children (ages <16) 
+            # 1. cddis var
+                # 'question'
+                # -9 (n=2), -8 (6923), -2 (7), -1 (1), 1 (261), 2 (1470) 
+                # parent reports as proxy; asked at ages 3, 5, 8
+            # Building it 
+                dt_survey[is.na(ind_disability) & cddis == 1,  `:=`(ind_disability = 1L, dis_source = "cddis")]
+                dt_survey[is.na(ind_disability) & cddis == 2,  `:=`(ind_disability = 0L, dis_source = "cddis")]
+
+        # For youths (ages 10-16)
+            # 1. ypltdis var
+                # -9 (only 11), 1 (40), 2 (197), 3 (1304)
+                # self-report; but used only where cddis is missing
+            # Building it 
+                dt_survey[is.na(ind_disability) & ypltdis %in% c(1, 2), `:=`(ind_disability = 1L, dis_source = "ypltdis")]
+                dt_survey[is.na(ind_disability) & ypltdis == 3, `:=`(ind_disability = 0L, dis_source = "ypltdis")]
+
+        # Imputation 
+            .SurvDisability <- function(data_in, ctr_code,
+                                        impute_children = TRUE,
+                                        impute_adults   = TRUE,
+                                        seed = 2026) {
+            # start with deep copy
+            data_out <- copy(data_in)
+            data_out[, dis_imputed := 0L]
+            # dis_imputed codes:
+            #   0 = observed
+            #   1 = child 3-15, imputed from observed rates
+            #   2 = child 0-2, set to not disabled
+            #   3 = adult 16+, imputed from observed rates
+
+            # Children <16
+                if (impute_children) {
+                    data_out[, child_band := cut(age_dv, c(-1, 4, 9, 15), labels = c("0_4", "5_9", "10_15"))]
+
+                    # observed rates among children who did answer, by sex and age band
+                    # (computed before ages 0-2 are set, so those zeros don't affect them)
+                    rates_child <- data_out[age_dv >= 0 & age_dv <= 15 & sex %in% c(1, 2) & !is.na(ind_disability),
+                                            .(p = mean(ind_disability), n = .N), by = .(sex, child_band)]
+                    cat("\nObserved child disability rates used for imputation:\n")
+                    print(rates_child[order(sex, child_band)])
+
+                    # ages 0-2: no disability question asked; treat as not disabled
+                    n_infants <- data_out[age_dv >= 0 & age_dv <= 2 & is.na(ind_disability), .N]
+                    data_out[age_dv >= 0 & age_dv <= 2 & is.na(ind_disability),
+                            `:=`(ind_disability = 0L, dis_imputed = 2L)]
+
+                    # ages 3-15 without a valid answer: impute from observed rates
+                    need_child <- data_out[age_dv >= 3 & age_dv <= 15 & sex %in% c(1, 2) & is.na(ind_disability),
+                                        .(pidp, sex, child_band)]
+                    need_child <- merge(need_child, rates_child[, .(sex, child_band, p)],
+                                        by = c("sex", "child_band"), all.x = TRUE)
+                    if (anyNA(need_child$p)) stop("No observed disability rate for some sex/age groups of children")
+
+                    set.seed(seed)
+                    need_child[, imp := rbinom(.N, 1, p)]
+                    data_out[need_child, on = "pidp", `:=`(ind_disability = i.imp, dis_imputed = 1L)]
+
+                    cat("Set to not disabled (ages 0-2): ", n_infants, " children.\n", sep = "")
+                    cat("Imputed from observed rates (ages 3-15): ", nrow(need_child), " children.\n", sep = "")
+                }
+
+            # Adults 16+
+                if (impute_adults) {
+                    data_out[, adult_band := cut(age_dv, c(15, 24, 34, 49, 64, Inf),
+                                                labels = c("16_24", "25_34", "35_49", "50_64", "65p"))]
+
+                    rates_adult <- data_out[age_dv >= 16 & sex %in% c(1, 2) & !is.na(ind_disability),
+                                            .(p = mean(ind_disability), n = .N), by = .(sex, adult_band)]
+                    cat("\nObserved adult disability rates used for imputation:\n")
+                    print(rates_adult[order(sex, adult_band)])
+
+                    need_adult <- data_out[age_dv >= 16 & sex %in% c(1, 2) & is.na(ind_disability),
+                                        .(pidp, sex, adult_band)]
+                    need_adult <- merge(need_adult, rates_adult[, .(sex, adult_band, p)],
+                                        by = c("sex", "adult_band"), all.x = TRUE)
+                    if (anyNA(need_adult$p)) stop("No observed disability rate for some sex/age groups of adults")
+
+                    set.seed(seed + 1)
+                    need_adult[, imp := rbinom(.N, 1, p)]
+                    data_out[need_adult, on = "pidp", `:=`(ind_disability = i.imp, dis_imputed = 3L)]
+
+                    cat("Imputed from observed rates (adults 16+): ", nrow(need_adult), " adults.\n", sep = "")
+                }
+
+            # imputation summary 
+                cat("\nDisability by imputation status:\n")
+                print(data_out[, .N, by = .(dis_imputed, ind_disability)][order(dis_imputed, ind_disability)])
+                n_left <- data_out[is.na(ind_disability), .N]
+                if (n_left > 0) cat("Still missing (e.g. invalid age or sex): ", n_left, "\n", sep = "")
+
+            # reduce & return
+                data_out <- copy(data_out[, .(hidp, pidp, new_var = ind_disability, imp_flag = dis_imputed)])
+                setkey(data_out, hidp, pidp)
+                data.table::setnames(data_out, old = c("new_var", "imp_flag"),
+                                    new = paste0(ctr_code, c("_ind_disability", "_ind_disability_imputed")))
+                return(data_out)
+                }
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [3] Identify Kinship Structure ### 
+        
+        # identify the household heads #
+        dt_survey[, hhref := 0L]
+        dt_survey[pno == 1L, hhref := 1L]
+        data.table::fwrite(x = copy(dt_survey[pno == 1L, .(hidp, hhref = pidp)]),
+                        file = "Output/Survey/hh_all_refs.csv")
+
+        # identify the number of people in each household 
+        dt_survey[, pno_max := max(pno), by = "hidp"]
+        setkey(dt_survey, hidp, pno)
+
+        # family relationship
+        dt_egoalt   <- data.table::fread("Input/Survey/n_egoalt.tab")  
+        l_keep_vars[[6L]] <- c("hidp",
+                            "pidp",
+                            "pno",
+                            "apidp",
+                            "apno",
+                                "relationship_dv")
+        dt_egoalt <- .RenamneFun(dt_in = dt_egoalt, wv = l_definitions$us_wave)
+        dt_egoalt <- .SubsetFun(dt_in = dt_egoalt, l_sub = l_keep_vars, i = 6L)
+        dt_egoalt[, kinship := as.character("not_recorded")]
+        dt_egoalt[
+            relationship_dv == -9, kinship := "missing"][
+            relationship_dv ==  1, kinship := "husband_wife"][
+            relationship_dv ==  2, kinship := "partner_cohabitee"][
+            relationship_dv ==  3, kinship := "civil_partner"][
+            relationship_dv ==  4, kinship := "natural_son_daughter"][
+            relationship_dv ==  5, kinship := "adopted_son_daughter"][
+            relationship_dv ==  6, kinship := "foster_child"][
+            relationship_dv ==  7, kinship := "stepson_stepdaughter"][
+            relationship_dv ==  8, kinship := "son_in_law_daughter_in_law"][
+            relationship_dv ==  9, kinship := "natural_parent"][
+            relationship_dv == 10, kinship := "adoptive_parent"][
+            relationship_dv == 11, kinship := "foster_parent"][
+            relationship_dv == 12, kinship := "step_parent"][
+            relationship_dv == 13, kinship := "parent_in_law"][
+            relationship_dv == 14, kinship := "natural_brother_sister"][
+            relationship_dv == 15, kinship := "half_brother_sister"][
+            relationship_dv == 16, kinship := "step_brother_sister"][
+            relationship_dv == 17, kinship := "adopted_brother_sister"][
+            relationship_dv == 18, kinship := "foster_brother_sister"][
+            relationship_dv == 19, kinship := "brother_sister_in_law"][
+            relationship_dv == 20, kinship := "grand_child"][
+            relationship_dv == 21, kinship := "grand_parent"][
+            relationship_dv == 22, kinship := "cousin"][
+            relationship_dv == 23, kinship := "aunt_uncle"][
+            relationship_dv == 24, kinship := "niece_nephew"][
+            relationship_dv == 25, kinship := "other_relative"][
+            relationship_dv == 26, kinship := "employee"][
+            relationship_dv == 27, kinship := "employer"][
+            relationship_dv == 28, kinship := "lodger_boarder_tenant"][
+            relationship_dv == 29, kinship := "landlord_landlady"][
+            relationship_dv == 30, kinship := "other_non_relative"]
+
+        dt_egoalt <- copy(dt_egoalt[apno <= 5, .(hidp, pidp, apno, kinship)])
+        data.table::setkey(dt_egoalt, hidp, pidp, apno)
+        dt_egoalt[, status := paste0("kinship",seq_len(.N)), by = "pidp"]
+        dt_egoalt <- data.table::dcast(dt_egoalt[, .(hidp, pidp, status, kinship)],
+                                    hidp + pidp ~ status, value.var = "kinship")
+
+        dt_survey <- merge(x = dt_survey, y = dt_egoalt,
+                            by = c("hidp", "pidp"), all.x = TRUE)
+
+        # key and setcolorder
+        data.table::setcolorder(dt_survey,
+                    c("hidp", "pno_max", "pno", "pidp", "buno_dv", "hhref", "source"))
+        data.table::setkey(dt_survey, hidp, buno_dv, pno)
+
+        # surv size after all merges 
+        l_definitions$diag_surv_size_hh_merge <- length(unique(dt_survey$hidp))
+        l_definitions$diag_surv_size_ind_merge <- length(unique(dt_survey$pidp))
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [4] Recode Key Variables Used for Constraints ###
+    ## [4.1] Recode for Household Level #
+        rm(dt_survey_EW)
+        # c00 HH Region
+            .SurvRegion <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # recoding
+            data_out[,  gor_dv := as.character(gor_dv)]
+            data_out[gor_dv %in% c(1:9), gor_dv := "england"]
+            data_out[gor_dv %in% c(10:12), gor_dv := "other"]
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = gor_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_region"))
+            
+            # explicit return
+            return(data_out)
+            }
+
+            # function call: EW
+            dt_extracted <- .SurvRegion(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        # c01 HH Urban Rural Functional Form
+            .SurvUrbanRural <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # recoding
+            data_out[,  urban_dv := as.character(urban_dv)]
+            data_out[urban_dv == "-9", urban_dv := as.character(NA)]
+            data_out[urban_dv == "1", urban_dv := "urban"]
+            data_out[urban_dv == "2", urban_dv := "rural"]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = urban_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_urban_rural"))
+            
+            # explicit return
+            return(data_out)
+            }
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvUrbanRural(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvUrbanRural(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvUrbanRural(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c02 HH Heating Functional Form 
+            .SurvHeating <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # recoding 
+            data_out[, heatch := as.character(heatch)]
+            data_out[heatch %in% c("-2", "-1"), heatch := as.character(NA)]
+            data_out[heatch == "1", heatch := "with_heating"]
+            data_out[heatch == "2", heatch := "without_heating"]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = heatch)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_heating"))
+            
+            # explicit return
+            return(data_out)
+            }
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHeating(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHeating(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvHeating(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c03 HH Type Functional Form 
+            .SurvHHType <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # SCOTLAND # 
+            if (ctr_code == "SCO") {
+                data_out[, hhtype_dv := as.character(hhtype_dv)]
+                data_out[hhtype_dv %in% c("1", "2"),hhtype_dv := "one_person_pensionable_no_children"]                              # any one person HH >= 66M/60F, no children: D4 ! we assign women 60-65 to be 66+ !
+                data_out[hhtype_dv %in% c("3"),   hhtype_dv := "one_person_not_pensionable_no_children"]                            # any one person HH younger, no children: E4
+                data_out[hhtype_dv %in% c("4"), hhtype_dv := "lone_parent_one_child"]                                               # lone parent household, 1 child: S4
+                data_out[hhtype_dv %in% c("5"), hhtype_dv := "lone_parent_two_or_more_children"]                                    # lone parent household, 2+ children: T4/U4
+                data_out[hhtype_dv %in% c("6", "8", "19"), hhtype_dv := "couple_married_civil_no_children"]                         # married/civil/couple, no children, incl. others: I4/N4
+                data_out[hhtype_dv %in% c("10", "11", "12", "20", "21"), hhtype_dv := "couple_married_civil_one_or_more_children"]  # married/civil/couple, 1+ children: J4/O4
+                data_out[hhtype_dv %in% c("16", "17", "18", "22", "23"), hhtype_dv := "hh_type_other"]    
+            }
+            # ENGLAND WALES
+            if (ctr_code == "EW" | ctr_code == "NI") {
+            data_out[, hhtype_dv := as.character(hhtype_dv)]
+            data_out[hhtype_dv %in% c("1", "2", "3"),hhtype_dv := "one_person_household"]          
+            data_out[hhtype_dv %in% c("4","5"), hhtype_dv := "lone_parent"]                                                # lone parent household with/without dependent children
+            data_out[hhtype_dv %in% c("6", "8", "19"), hhtype_dv := "couple_married_civil_no_children"]                    # married/civil/couple, no children, incl. others: I4/N4
+            data_out[hhtype_dv %in% c("10", "11", "12", "20", "21"), hhtype_dv := "couple_married_civil_with_children"]    # married/civil/couple, 1+ children: J4/O4
+            data_out[hhtype_dv %in% c("16", "17", "18", "22", "23"), hhtype_dv := "other"]                                 # other                              # V4 onwards 
+            }
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = hhtype_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_type"))
+
+            # explicit return
+            return(data_out)
+            } 
+            
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHHType(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHHType(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvHHType(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c04 HH tenure X age of youngest child #
+
+            .SurvHHTenureChild <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # GENERAL RECODING
+            data_out[,  tenure_dv := as.character(tenure_dv)]
+            data_out[tenure_dv == "1",  tenure_dv := "owned_outright"]
+            data_out[tenure_dv == "2",  tenure_dv := "owned_mortgage"]
+            data_out[tenure_dv == "3",  tenure_dv := "social_rented"]
+            data_out[tenure_dv == "4",  tenure_dv := "social_rented"]
+            data_out[tenure_dv == "5",  tenure_dv := "private_rented"]
+            data_out[tenure_dv == "6",  tenure_dv := "private_rented"]
+            data_out[tenure_dv == "7",  tenure_dv := "private_rented"]
+            data_out[tenure_dv == "8",  tenure_dv := "private_rented"]
+            data_out[tenure_dv == "-9", tenure_dv := as.character(NA)]
+            
+            # add dependent children flag
+            data_out[, dependent_child := 0]              # initialize ... then SG definition
+            data_out[age_dv <= 15, dependent_child := 1]  # any person younger than 15
+            data_out[                                     # OR 16-18 and in FT education
+                (age_dv >= 16 & age_dv <= 18) &             #    and not married/partner/cohabited
+                (jbstat %in% c(7, 9, 11)) & 
+                ((kinship1 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship2 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship3 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship4 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child"))|
+                    (kinship5 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child"))) & 
+                (!(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship2 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner"))),
+                dependent_child := 1]
+            data_out[, dependent_child_count := sum(dependent_child), by = c("hidp")]
+            
+            # add youngest dependent children age
+            data_out[dependent_child == 1, min_age := min(age_dv), by = c("hidp")]
+            data_out[, youngest_child := as.integer(NA)]
+            data_out[dependent_child == 1 & age_dv == min_age, youngest_child := age_dv]
+            data_out[, youngest_child := min(youngest_child, na.rm = TRUE), by = c("hidp")]
+            setkey(data_out, hidp, pno)
+            
+            # SCOTLAND # 
+            if (ctr_code == "SCO") {
+
+                # combine
+                data_out[tenure_dv == "owned_outright" & is.na(youngest_child), tenure_dv := "owned_outright_no_children"]
+                data_out[tenure_dv == "owned_mortgage" & is.na(youngest_child), tenure_dv := "owned_mortgage_no_children"]
+                data_out[tenure_dv == "social_rented"  & is.na(youngest_child), tenure_dv := "social_rented_no_children"]
+                data_out[tenure_dv == "private_rented" & is.na(youngest_child), tenure_dv := "private_rented_no_children"]
+                
+                data_out[tenure_dv == "owned_outright" & youngest_child <= 4, tenure_dv := "owned_outright_00_04"]
+                data_out[tenure_dv == "owned_mortgage" & youngest_child <= 4, tenure_dv := "owned_mortgage_00_04"]
+                data_out[tenure_dv == "social_rented"  & youngest_child <= 4, tenure_dv := "social_rented_00_04"]
+                data_out[tenure_dv == "private_rented" & youngest_child <= 4, tenure_dv := "private_rented_00_04"]
+                
+                data_out[tenure_dv == "owned_outright" & youngest_child >= 5 & youngest_child <= 11, tenure_dv := "owned_outright_05_11"]
+                data_out[tenure_dv == "owned_mortgage" & youngest_child >= 5 & youngest_child <= 11, tenure_dv := "owned_mortgage_05_11"]
+                data_out[tenure_dv == "social_rented"  & youngest_child >= 5 & youngest_child <= 11, tenure_dv := "social_rented_05_11"]
+                data_out[tenure_dv == "private_rented" & youngest_child >= 5 & youngest_child <= 11, tenure_dv := "private_rented_05_11"]
+                
+                data_out[tenure_dv == "owned_outright" & youngest_child >= 12 & youngest_child <= 18, tenure_dv := "owned_outright_12_18"]
+                data_out[tenure_dv == "owned_mortgage" & youngest_child >= 12 & youngest_child <= 18, tenure_dv := "owned_mortgage_12_18"]
+                data_out[tenure_dv == "social_rented"  & youngest_child >= 12 & youngest_child <= 18, tenure_dv := "social_rented_12_18"]
+                data_out[tenure_dv == "private_rented" & youngest_child >= 12 & youngest_child <= 18, tenure_dv := "private_rented_12_18"]
+            }
+            
+            # ENGLAND WALES
+            if (ctr_code == "EW") {
+
+                # combine
+                data_out[tenure_dv == "owned_outright" & is.na(youngest_child), tenure_dv := "owned_outright_no_children"]
+                data_out[tenure_dv == "owned_mortgage" & is.na(youngest_child), tenure_dv := "owned_mortgage_no_children"]
+                data_out[tenure_dv == "social_rented"  & is.na(youngest_child), tenure_dv := "social_rented_no_children"]
+                data_out[tenure_dv == "private_rented" & is.na(youngest_child), tenure_dv := "private_rented_no_children"]
+                
+                data_out[tenure_dv == "owned_outright" & youngest_child <= 18, tenure_dv := "owned_outright_with_children"]
+                data_out[tenure_dv == "owned_mortgage" & youngest_child <= 18, tenure_dv := "owned_mortgage_with_children"]
+                data_out[tenure_dv == "social_rented"  & youngest_child <= 18, tenure_dv := "social_rented_with_children"]
+                data_out[tenure_dv == "private_rented" & youngest_child <= 18, tenure_dv := "private_rented_with_children"]
+            }
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = tenure_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            if (ctr_code == "SCO"){
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_tenure_youngest_child"))
+            }
+            
+            if (ctr_code == "EW") {
+                data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_tenure_presence_child"))
+            }
+            
+            if (ctr_code == "NI") {
+                data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_tenure"))
+            }
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHHTenureChild(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHHTenureChild(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvHHTenureChild(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c04b HH age of youngest child - NI only #
+
+            .SurvHHChildNI <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # add dependent children flag
+            data_out[, dependent_child := 0]              # initialize ... then SG definition
+            data_out[age_dv <= 15, dependent_child := 1]  # any person younger than 15
+            data_out[                                     # OR 16-18 and in FT education
+                (age_dv >= 16 & age_dv <= 18) &             #    and not married/partner/cohabited
+                (jbstat %in% c(7, 9, 11)) & 
+                ((kinship1 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship2 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship3 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child")) |
+                    (kinship4 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child"))|
+                    (kinship5 %in% c("natural_son_daughter", "adopted_son_daughter",
+                                    "foster_child", "stepson_stepdaughter", "grand_child"))) & 
+                (!(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship2 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) |
+                    !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner"))),
+                dependent_child := 1]
+            data_out[, dependent_child_count := sum(dependent_child), by = c("hidp")]
+            
+            # add youngest dependent children age
+            data_out[dependent_child == 1, min_age := min(age_dv), by = c("hidp")]
+            data_out[, youngest_child := as.integer(NA)]
+            data_out[dependent_child == 1 & age_dv == min_age, youngest_child := age_dv]
+            data_out[, youngest_child := min(youngest_child, na.rm = TRUE), by = c("hidp")]
+            setkey(data_out, hidp, pno)
+            
+            # combine
+            data_out[, hh_youngest_child := as.character(NA)]
+            data_out[dependent_child_count == 0, hh_youngest_child := "no_child"]
+            data_out[youngest_child <= 4, hh_youngest_child := "youngest_child_00_04"]
+            data_out[youngest_child >= 5 & youngest_child <= 11, hh_youngest_child := "youngest_child_05_11"]
+            data_out[youngest_child >= 12 & youngest_child <= 18, hh_youngest_child := "youngest_child_12_18"]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_youngest_child)])
+            setkey(data_out, hidp, pidp)
+            
+            data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_youngest_child"))
+
+                # explicit return
+            return(data_out)
+            } 
+
+            # function call: NI Only 
+            dt_extracted <- .SurvHHChildNI(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c05 HH cars + HH size #
+
+            .SurvHHCarsSize <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # capping HH Size #
+            data_out[hhsize >= 4, hhsize := 4] 
+            data_out[, hhsize := paste0("hh_size_0",hhsize)]
+            data_out[hhsize == "hh_size_04", hhsize := "hh_size_04p"]
+            
+            
+            # SCOTLAND
+            if (ctr_code == "SCO") {
+            
+                # capping number of cars
+                data_out[ncars >= 4, ncars := 4]   # 4 or more cars 
+                data_out[ncars %in% c(-2, -1), ncars := NA]
+                data_out[, ncars := paste0("hh_cars_0",as.character(ncars))]
+                data_out[ncars == "hh_cars_0NA", ncars := NA]
+                data_out[ncars == "hh_cars_04" , ncars := "hh_cars_04p"]
+                
+                # hh cars by size
+                data_out[, hh_ncars_hh_size := as.character(NA)]
+                data_out[!is.na(ncars) & !is.na(hhsize),
+                        hh_ncars_hh_size := paste0(ncars,"_",hhsize)]
+            }
+            
+            # ENGLAND WALES
+            if (ctr_code == "EW" | ctr_code == "NI") {
+                
+                # capping number of cars
+                data_out[ncars >= 2, ncars := 2]   # 2 or more cars 
+                data_out[ncars %in% c(-2, -1), ncars := NA]
+                data_out[, ncars := paste0("hh_cars_0",as.character(ncars))]
+                data_out[ncars == "hh_cars_0NA", ncars := NA]
+                data_out[ncars == "hh_cars_02" , ncars := "hh_cars_02p"]
+                
+                
+                # hh cars by size
+                data_out[, hh_ncars_hh_size := as.character(NA)]
+                data_out[!is.na(ncars) & !is.na(hhsize),
+                        hh_ncars_hh_size := paste0(ncars,"_",hhsize)]
+            }
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_ncars_hh_size)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_cars_hh_size"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHHCarsSize(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHHCarsSize(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvHHCarsSize(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c06 HH bedrooms + HH size #
+            .SurvHHBedsSize <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # capping HH Size #
+            data_out[hhsize >= 4, hhsize := 4] 
+            data_out[, hhsize := paste0("hh_size_0",hhsize)]
+            data_out[hhsize == "hh_size_04", hhsize := "hh_size_04p"]
+            
+            # GENERAL RECODING
+            if (ctr_code == "SCO") {
+                data_out[hsbeds >= 5, hsbeds := 5]   # 5 or more open ended 
+                data_out[,  hsbeds := as.character(hsbeds)]
+                data_out[hsbeds %in% c("-2", "-1"), hsbeds := as.character(NA)] # missing
+                data_out[hsbeds %in% c("0", "1"),   hsbeds := "1"] # 1 bed
+                data_out[hsbeds == "2", hsbeds := "2"]             # 2 beds
+                data_out[hsbeds == "3", hsbeds := "3"]             # 3 beds
+                data_out[hsbeds == "4", hsbeds := "4"]             # 4 beds
+                data_out[hsbeds == "5", hsbeds := "5p"]            # 5p beds
+                data_out[, hsbeds := paste0("hh_beds_0",hsbeds)]
+                data_out[hsbeds == "hh_beds_0NA", hsbeds := NA]
+            }
+            
+            if (ctr_code == "EW") {
+                data_out[hsbeds >= 4, hsbeds := 4]   # 4 or more open ended 
+                data_out[,  hsbeds := as.character(hsbeds)]
+                data_out[hsbeds %in% c("-2", "-1"), hsbeds := as.character(NA)] # missing
+                data_out[hsbeds %in% c("0", "1"),   hsbeds := "1"] # 1 bed
+                data_out[hsbeds == "2", hsbeds := "2"]             # 2 beds
+                data_out[hsbeds == "3", hsbeds := "3"]             # 3 beds
+                data_out[hsbeds == "4", hsbeds := "4p"]            # 4p beds
+                data_out[, hsbeds := paste0("hh_beds_0",hsbeds)]
+                data_out[hsbeds == "hh_beds_0NA", hsbeds := NA]
+            }
+            
+            if (ctr_code == "NI") {
+                # recode inputs - habitable rooms = bedrooms + other rooms (excl kitchen/bath)
+                data_out[hsbeds  <= -1, hsbeds  := as.integer(NA)]
+                data_out[hsrooms <= -1, hsrooms := as.integer(NA)]
+                # initialise / create habitable rooms 
+                data_out[, hh_hrooms := as.integer(NA)]
+                data_out[, hh_hrooms := hsbeds + hsrooms]  
+                data_out[hh_hrooms >= 8, hh_hrooms := 8]   # 8 or more habitable rooms
+                data_out[, hh_hrooms := paste0("hh_hrooms_0",hh_hrooms)]
+                data_out[hh_hrooms %in% c("hh_hrooms_01", "hh_hrooms_02", "hh_hrooms_03"),
+                        hh_hrooms := "hh_hrooms_01_02_03"]   # 8 or more habitable rooms
+                data_out[hh_hrooms == "hh_hrooms_08", hh_hrooms := "hh_hrooms_08p"]   # 8 or more habitable rooms
+                data_out[hh_hrooms == "hh_hrooms_0NA", hh_hrooms := NA]
+            }
+            
+            if (ctr_code == "SCO" | ctr_code == "EW") {
+                # hh beds by hh size
+                data_out[!is.na(hsbeds) & !is.na(hhsize),
+                        hh_nbeds_hh_size := paste0(hsbeds,"_",hhsize)]
+                
+                # reduce & return
+                data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_nbeds_hh_size)])
+                setkey(data_out, hidp, pidp)
+                
+                # tidy variable names
+                data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_beds_hh_size"))
+            }
+            
+            if (ctr_code == "NI") {
+                # reduce & return
+                data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_hrooms)])
+                setkey(data_out, hidp, pidp)
+                
+                # tidy variable names
+                data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_hrooms"))
+            }
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHHBedsSize(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHHBedsSize(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # # function call: NI 
+            dt_extracted <- .SurvHHBedsSize(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c07 HH Activity X Size - Counts Cat
+            .SurvActivitySize <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # capping HH Size #
+            data_out[hhsize >= 4, hhsize := 4] 
+            data_out[, hhsize := paste0("hh_size_0",hhsize)]
+            data_out[hhsize == "hh_size_04", hhsize := "hh_size_04p"]
+            
+            # general recoding
+            data_out[,  jbstat := as.character(jbstat)]
+            data_out[jbstat %in% c("-1", "-2"), jbstat := NA]
+            data_out[jbstat == "1",  jbstat := "self_employed"]
+            data_out[jbstat %in% c("2", "5", "14", "15"),  jbstat := "employed"]
+            data_out[jbstat == "3",  jbstat := "unemployed"]
+            data_out[jbstat == "4",  jbstat := "retired"]
+            data_out[jbstat == "6",  jbstat := "looking_after_home"]
+            data_out[jbstat == "7",  jbstat := "student_ft"]
+            data_out[jbstat == "8",  jbstat := "lts_disabled"]
+            data_out[jbstat %in% c("9", "10", "11", "12", "13", "97"),  jbstat := "activity_other"]
+            data_out[age_dv <= 15, jbstat := "activity_not_applicable"]
+            
+            # GENERAL RECODING
+            data_out[, employment := 0L]
+            data_out[, employment_count := 0L]
+            data_out[jbstat %in% c("employed", "employed"), employment := 1L]
+            data_out[, employment_count := sum(employment), by = "hidp"]
+            data_out[employment_count >= 3,  employment_count := 3]
+            data_out[,  employment_count := as.character(employment_count)]
+            data_out[employment_count == "3",  employment_count := "3p"]
+            
+            data_out[, hh_nemployment_size := as.character(NA)]
+            data_out[, hh_nemployment_size := paste0("hh_employed_0",employment_count,"_",hhsize)]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_nemployment_size)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_employment_hh_size"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvActivitySize(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvActivitySize(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvActivitySize(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            
+            # ----- # 
+
+    ## [4.2] Recode for Individual Level # 
+        # c08 Ind Unpaid Carer
+            .SurvCarerSize <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # capping HH Size #
+            data_out[hhsize >= 4, hhsize := 4] 
+            data_out[, hhsize := paste0("hh_size_0",hhsize)]
+            
+            # GENERAL RECODING: carer
+            data_out[, carer    := as.character(NA)]
+            data_out[aidhh == 1 | naidxhh >= 1, carer :=  "carer_yes"]
+            data_out[(aidhh == 2 | aidhh == -8) & naidxhh <= 0, carer :=  "carer_no"]
+            data_out[age_dv <= 15, carer := "carer_not_applicable"]
+
+            # count carer
+            data_out[, hh_ncarer_size  := as.integer(0L)]
+            data_out[, carer_flag := as.integer(0L)]
+            data_out[carer == "carer_yes", carer_flag := as.integer(1)]
+            data_out[, hh_ncarer_size := sum(carer_flag), by = "hidp"]
+            data_out[hh_ncarer_size >= 2, hh_ncarer_size := 2] 
+            data_out[, hh_ncarer_size := paste0("hh_carer_0",hh_ncarer_size)]
+            
+            # SCOTLAND
+            if (ctr_code == "SCO") {
+                data_out[hh_ncarer_size == "hh_carer_00" & (hhsize ==  "hh_size_01" | hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_00_hh_size_01_02"]
+                data_out[hh_ncarer_size == "hh_carer_00" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_00_hh_size_03p"]
+                data_out[hh_ncarer_size == "hh_carer_01" & (hhsize ==  "hh_size_01" | hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_01_hh_size_01_02"]
+                data_out[hh_ncarer_size == "hh_carer_01" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_01_hh_size_03p"]
+                data_out[hh_ncarer_size == "hh_carer_02" & (hhsize ==  "hh_size_01" | hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_02p_hh_size_01_02"]
+                data_out[hh_ncarer_size == "hh_carer_02" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_02p_hh_size_03p"]
+            }
+            
+            # NI
+            if (ctr_code == "NI") {
+                data_out[hh_ncarer_size == "hh_carer_00" & (hhsize ==  "hh_size_01"),
+                        hh_ncarer_size := "hh_carer_00_hh_size_01"]
+                data_out[hh_ncarer_size == "hh_carer_00" & (hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_00_hh_size_02"]
+                data_out[hh_ncarer_size == "hh_carer_00" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_00_hh_size_03p"]
+                data_out[hh_ncarer_size == "hh_carer_01" & (hhsize ==  "hh_size_01"),
+                        hh_ncarer_size := "hh_carer_01_hh_size_01"]
+                data_out[hh_ncarer_size == "hh_carer_01" & (hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_01_hh_size_02"]
+                data_out[hh_ncarer_size == "hh_carer_01" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_01_hh_size_03p"]
+                data_out[hh_ncarer_size == "hh_carer_02" & (hhsize ==  "hh_size_01" | hhsize ==  "hh_size_02"),
+                        hh_ncarer_size := "hh_carer_02p_hh_size_02"]
+                data_out[hh_ncarer_size == "hh_carer_02" & (hhsize ==  "hh_size_03" | hhsize ==  "hh_size_04"),
+                        hh_ncarer_size := "hh_carer_02p_hh_size_03p"]
+            }
+            
+            # EW
+            if (ctr_code == "EW") {
+            data_out[hh_ncarer_size == "hh_carer_02", hh_ncarer_size := "hh_carer_02p"]
+            } 
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = hh_ncarer_size)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            if (ctr_code == "SCO" | ctr_code == "NI"){
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_carer_hh_size"))
+            }
+            if (ctr_code == "EW") {
+                data.table::setnames(data_out, old = "new_var",
+                                    new = paste0(ctr_code,"_hh_carer"))
+            }
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvCarerSize(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvCarerSize(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvCarerSize(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c09 Ind Sex X Age # 1 = male / 2 = female 
+            .SurvSexAge <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # General Recoding
+            data_out[, sex_age := as.character(NA)]
+
+            data_out[sex == 2 & age_dv <= 15, sex_age := "f_00_15"]
+            data_out[sex == 2 & (age_dv >= 16 & age_dv <= 24), sex_age := "f_16_24"]   
+            data_out[sex == 2 & (age_dv >= 25 & age_dv <= 34), sex_age := "f_25_34"]      
+            data_out[sex == 2 & (age_dv >= 35 & age_dv <= 49), sex_age := "f_35_49"]      
+            data_out[sex == 2 & (age_dv >= 50 & age_dv <= 64), sex_age := "f_50_64"]      
+            data_out[sex == 2 & (age_dv >= 65), sex_age := "f_65p"]      
+
+            data_out[sex == 1 & age_dv <= 15, sex_age := "m_00_15"]
+            data_out[sex == 1 & (age_dv >= 16 & age_dv <= 24), sex_age := "m_16_24"]   
+            data_out[sex == 1 & (age_dv >= 25 & age_dv <= 34), sex_age := "m_25_34"]      
+            data_out[sex == 1 & (age_dv >= 35 & age_dv <= 49), sex_age := "m_35_49"]      
+            data_out[sex == 1 & (age_dv >= 50 & age_dv <= 64), sex_age := "m_50_64"]      
+            data_out[sex == 1 & (age_dv >= 65), sex_age := "m_65p"]      
+
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp,pidp, new_var = sex_age)])
+            setkey(data_out, hidp, pidp)
+
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_sex_age"))
+
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvSexAge(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvSexAge(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvSexAge(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            # ----- # 
+
+        # c10 Ind Education
+            .SurvEdu <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # General Recoding
+            data_out[, hiqual_dv := as.character(hiqual_dv)]
+            data_out[hiqual_dv %in% c("-8", "-9"), hiqual_dv := NA]
+            data_out[hiqual_dv %in% c("1"), hiqual_dv := "degree_level"]
+            data_out[hiqual_dv %in% c("2","3"), hiqual_dv := "upper_further"]
+            data_out[hiqual_dv %in% c("4"), hiqual_dv := "lower_school"]
+            data_out[hiqual_dv %in% c("5"), hiqual_dv := "education_other"]
+            data_out[hiqual_dv %in% c("9"), hiqual_dv := "no_qualification"]
+            data_out[age_dv <= 15, hiqual_dv := "education_not_applicable"]   
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = hiqual_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_education"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvEdu(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvEdu(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvEdu(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c11 Ind Ethnicity #
+            .SurvEth <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # General Recoding
+            data_out[, ethn_dv := as.character(ethn_dv)]
+            data_out[ethn_dv %in% c("-9"), ethn_dv := NA]
+            data_out[ethn_dv %in% c("1","2","3","4"), ethn_dv := "white"]
+            data_out[ethn_dv %in% c("5","6","7","8"), ethn_dv := "mixed"]
+            data_out[ethn_dv %in% c("9","10","11","12","13"), ethn_dv := "asian"]
+            data_out[ethn_dv %in% c("14"), ethn_dv := "caribbean_black"]
+            data_out[ethn_dv %in% c("15","16"), ethn_dv := "african"]
+            data_out[ethn_dv %in% c("17","97"), ethn_dv := "ethnicity_other"]
+            
+            # recode ethnicity for children based on HH ref where mising
+            data_out[, ethn_dv_ref := as.character(NA)]
+            data_out[hhref == 1, ethn_dv_ref := ethn_dv]
+            data_out[, ethn_dv_ref := zoo::na.locf(ethn_dv_ref, na.rm = FALSE), by = c("hidp")]
+            data_out[is.na(ethn_dv) & age_dv <= 15, ethn_dv := ethn_dv_ref]
+            data_out[, ethn_dv_ref := NULL]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = ethn_dv)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_ethnicity"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvEth(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvEth(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvEth(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c12 Ind Partnership #
+            .SurvPartner <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # General Recoding
+            data_out[, marstat := as.character(marstat)]
+            data_out[marstat %in% c("-9","-8","-7","-2","-1"), marstat := NA]
+            data_out[marstat %in% c("1"), marstat := "single"]
+            data_out[marstat %in% c("2","3"), marstat := "married_civil"]
+            data_out[marstat %in% c("4","7","8"), marstat := "separated"]
+            data_out[marstat %in% c("5"), marstat := "divorced"]
+            data_out[marstat %in% c("6","9"), marstat := "widowed"]
+            data_out[age_dv <= 15, marstat := "partnership_not_applicable"]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = marstat)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_partnership"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvPartner(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvPartner(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvPartner(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # ----- # 
+
+        # c13 Ind Health #
+            .SurvHealth <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # General Recoding
+            data_out[, scsf1 := as.character(scsf1)]
+            data_out[scsf1 %in% c("-9","-8","-7","-2","-1"), scsf1 := NA]
+            data_out[scsf1 %in% c("1","2"), scsf1 := "very_good"]
+            data_out[scsf1 %in% c("3"), scsf1 := "good"]
+            data_out[scsf1 %in% c("4"), scsf1 := "fair"]
+            data_out[scsf1 %in% c("5"), scsf1 := "bad"]
+            data_out[age_dv <= 15, scsf1 := "health_not_applicable"]
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = scsf1)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_health"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvHealth(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvHealth(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvHealth(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        # c13.1 Ind Disability
+            #   children 0-2: set to not disabled (question not asked)
+            #   children 3-15 and adults 16+ without a valid answer: imputed from observed rates by sex and age band
+            #   dis_imputed codes: 0 = observed, 1 = child imputed, 2 = child 0-2 set to 0, 3 = adult imputed
+
+            impute_children <- TRUE   # FALSE = leave children's missing disability as NA
+            impute_adults   <- TRUE   # FALSE = leave adults' missing disability as NA
+
+            .SurvDisability <- function(data_in, ctr_code,
+                                        impute_children = TRUE,
+                                        impute_adults   = TRUE,
+                                        seed = 2026) {
+              # start with deep copy
+              data_out <- copy(data_in)
+              data_out[, dis_imputed := 0L]
+
+              # ---- children (0-15) ----
+              if (impute_children) {
+                data_out[, child_band := cut(age_dv, c(-1, 4, 9, 15), labels = c("0_4", "5_9", "10_15"))]
+
+                # observed rates among children who did answer, by sex and age band
+                # (computed before ages 0-2 are set, so those zeros don't affect them)
+                rates_child <- data_out[age_dv >= 0 & age_dv <= 15 & sex %in% c(1, 2) & !is.na(ind_disability),
+                                        .(p = mean(ind_disability), n = .N), by = .(sex, child_band)]
+                cat("\nObserved child disability rates used for imputation:\n")
+                print(rates_child[order(sex, child_band)])
+
+                # ages 0-2: no disability question asked; treat as not disabled
+                n_infants <- data_out[age_dv >= 0 & age_dv <= 2 & is.na(ind_disability), .N]
+                data_out[age_dv >= 0 & age_dv <= 2 & is.na(ind_disability),
+                         `:=`(ind_disability = 0L, dis_imputed = 2L)]
+
+                # ages 3-15 without a valid answer: impute from observed rates
+                need_child <- data_out[age_dv >= 3 & age_dv <= 15 & sex %in% c(1, 2) & is.na(ind_disability),
+                                       .(pidp, sex, child_band)]
+                need_child <- merge(need_child, rates_child[, .(sex, child_band, p)],
+                                    by = c("sex", "child_band"), all.x = TRUE)
+                if (anyNA(need_child$p)) stop("No observed disability rate for some sex/age groups of children")
+
+                set.seed(seed)
+                need_child[, imp := rbinom(.N, 1, p)]
+                data_out[need_child, on = "pidp", `:=`(ind_disability = i.imp, dis_imputed = 1L)]
+
+                cat("Set to not disabled (ages 0-2): ", n_infants, " children.\n", sep = "")
+                cat("Imputed from observed rates (ages 3-15): ", nrow(need_child), " children.\n", sep = "")
+              }
+
+              # ---- adults (16+) ----
+              if (impute_adults) {
+                data_out[, adult_band := cut(age_dv, c(15, 24, 34, 49, 64, Inf),
+                                             labels = c("16_24", "25_34", "35_49", "50_64", "65p"))]
+
+                rates_adult <- data_out[age_dv >= 16 & sex %in% c(1, 2) & !is.na(ind_disability),
+                                        .(p = mean(ind_disability), n = .N), by = .(sex, adult_band)]
+                cat("\nObserved adult disability rates used for imputation:\n")
+                print(rates_adult[order(sex, adult_band)])
+
+                need_adult <- data_out[age_dv >= 16 & sex %in% c(1, 2) & is.na(ind_disability),
+                                       .(pidp, sex, adult_band)]
+                need_adult <- merge(need_adult, rates_adult[, .(sex, adult_band, p)],
+                                    by = c("sex", "adult_band"), all.x = TRUE)
+                if (anyNA(need_adult$p)) stop("No observed disability rate for some sex/age groups of adults")
+
+                set.seed(seed + 1)
+                need_adult[, imp := rbinom(.N, 1, p)]
+                data_out[need_adult, on = "pidp", `:=`(ind_disability = i.imp, dis_imputed = 3L)]
+
+                cat("Imputed from observed rates (adults 16+): ", nrow(need_adult), " adults.\n", sep = "")
+              }
+
+              # ---- summary ----
+              cat("\nDisability by imputation status:\n")
+              print(data_out[, .N, by = .(dis_imputed, ind_disability)][order(dis_imputed, ind_disability)])
+              n_left <- data_out[is.na(ind_disability), .N]
+              if (n_left > 0) cat("Still missing (e.g. invalid age or sex): ", n_left, "\n", sep = "")
+
+              # reduce & return
+              data_out <- copy(data_out[, .(hidp, pidp, new_var = ind_disability, imp_flag = dis_imputed)])
+              setkey(data_out, hidp, pidp)
+              # tidy variable names
+              data.table::setnames(data_out, old = c("new_var", "imp_flag"),
+                                   new = paste0(ctr_code, c("_ind_disability", "_ind_disability_imputed")))
+              # explicit return
+              return(data_out)
+            }
+
+            # run and merge back (outside the function)
+            dt_dis <- .SurvDisability(data_in = dt_survey, ctr_code = "EW",
+                                      impute_children = impute_children,
+                                      impute_adults   = impute_adults)
+            dt_survey <- merge(dt_survey, dt_dis[, !"hidp"], by = "pidp", all.x = TRUE)
+            
+        # c13.2 Ind Disability Sim
+            .SurvDisabilitySim <- function(data_in, ctr_code, seed = 123) {
+
+            data_out <- copy(data_in)
+
+            # recoding: apply probabilities
+            dt_prob_dis_as <- data.table::fread("Input/Survey/pred_grid_dis_age_sex.csv")
+            data_out <- merge(data_out, dt_prob_dis_as, by = c("sex", "age_dv"), all.x = TRUE)
+
+            set.seed(seed)
+            data_out[, ind_disability_sim := NA_integer_]
+            data_out[!is.na(prob_disability_as),
+                     ind_disability_sim := rbinom(n = .N, size = 1, prob = prob_disability_as)]
+
+            # ages 0-2 are not in the grid: treat as not disabled, as in P1
+            data_out[age_dv >= 0 & age_dv <= 2 & is.na(ind_disability_sim), ind_disability_sim := 0L]
+
+            if (anyNA(data_out[age_dv >= 0, ind_disability_sim])) {
+              warning(sum(is.na(data_out[age_dv >= 0, ind_disability_sim])),
+                      " people aged 0+ still have no simulated disability")
+            }
+
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = ind_disability_sim)])
+            setkey(data_out, hidp, pidp)
+            data.table::setnames(data_out, old = "new_var",
+                                 new = paste0(ctr_code, "_ind_disability_sim"))
+            return(data_out)
+            }
+
+            # function call: EW
+            dt_extracted <- .SurvDisabilitySim(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        # c13.3 Ind Disability x sex x age (uses the imputed EW_ind_disability)
+            .SurvDisabilitySexAge <- function(data_in, ctr_code) {
+
+            data_out <- copy(data_in)
+
+            sex_age_col <- paste0(ctr_code, "_ind_sex_age")
+            dis_col     <- paste0(ctr_code, "_ind_disability")
+
+            # combine; any missing part gives a real NA so Criteria 2 can catch it
+            data_out[, ind_sex_age_disability := fifelse(
+              is.na(get(sex_age_col)) | !(get(dis_col) %in% c(0, 1)),
+              NA_character_,
+              paste0(get(sex_age_col), "_", fifelse(get(dis_col) == 1, "dis1", "dis0"))
+            )]
+
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = ind_sex_age_disability)])
+            setkey(data_out, hidp, pidp)
+            data.table::setnames(data_out, old = "new_var",
+                                 new = paste0(ctr_code, "_ind_sex_age_disability"))
+            return(data_out)
+            }
+
+            # function call: EW
+            dt_extracted <- .SurvDisabilitySexAge(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        # c13.4 Ind Disability Sim x sex x age (reuses the single draw from c13.2)
+            .SurvDisabilitySexAgeSim <- function(data_in, ctr_code) {
+
+            data_out <- copy(data_in)
+
+            sex_age_col <- paste0(ctr_code, "_ind_sex_age")
+            sim_col     <- paste0(ctr_code, "_ind_disability_sim")
+
+            data_out[, ind_sex_age_disability_sim := fifelse(
+              is.na(get(sex_age_col)) | !(get(sim_col) %in% c(0, 1)),
+              NA_character_,
+              paste0(get(sex_age_col), "_", fifelse(get(sim_col) == 1, "dis_sim1", "dis_sim0"))
+            )]
+
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = ind_sex_age_disability_sim)])
+            setkey(data_out, hidp, pidp)
+            data.table::setnames(data_out, old = "new_var",
+                                 new = paste0(ctr_code, "_ind_sex_age_disability_sim"))
+            return(data_out)
+            }
+
+            # function call: EW
+            dt_extracted <- .SurvDisabilitySexAgeSim(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        # c13.5 Ind Adult (16+) Longstanding Health Condition (Disability) # 
+            # .SurvLongstanding <- function(data_in, ctr_code) {
+
+            # # start with deep copy 
+            # data_out <- copy(data_in)
+
+            # # General recoding 
+            # data_out[, health := as.character(health)]
+            # data_out[health %in% c("-9", "-2", "-1"), health := NA]
+            # data_out[health %in% c("1"), health := "longstandingyes"]
+            # data_out[health %in% c("2"), health := "longstandingno"]
+            # data_out[age_dv <= 15, health := "notadult"]
+
+            # # reduce & return 
+            # data_out <- copy(data_out[, .(hidp, pidp, new_var = health)])
+            # setkey(data_out, hidp, pidp)
+            
+            # # tidy variable names 
+            # data.table::setnames(data_out, old = "new_var", 
+            #                     new = paste0(ctr_code, "_ind_longstanding"))
+
+            # # explicit return
+            # return(data_out)
+            # }
+
+            # # function call: SCOTLAND
+            # dt_extracted <- .SurvLongstanding(data_in = dt_survey, ctr_code = "SCO")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            
+            # # function call: EW
+            # dt_extracted <- .SurvLongstanding(data_in = dt_survey, ctr_code = "EW")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            
+            # # function call: NI
+            # dt_extracted <- .SurvLongstanding(data_in = dt_survey, ctr_code = "NI")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            
+            
+        # c13.6 Ind Child (0-9) Longstanding Health Condition (Disability) #
+            # .SurvChhealth2 <- function(data_in, ctr_code) {
+            # # start with deep copy
+            # data_out <- copy(data_in)
+            # # General Recoding
+            # data_out[, chhealth2 := as.character(chhealth2)]
+            # data_out[chhealth2 %in% c("-9","-2","-1"), chhealth2 := NA]
+            # data_out[chhealth2 %in% c("1"), chhealth2 := "longstandingyes"]
+            # data_out[chhealth2 %in% c("2"), chhealth2 := "longstandingno"]
+            # data_out[age_dv >= 16, chhealth2 := "notchild"] 
+            # # reduce & return
+            # data_out <- copy(data_out[, .(hidp, pidp, new_var = chhealth2)])
+            # setkey(data_out, hidp, pidp)
+            # # tidy variable names
+            # data.table::setnames(data_out, old = "new_var",
+            #                     new = paste0(ctr_code,"_ind_chhealth2"))
+            # # explicit return
+            # return(data_out)
+            # }
+            # # function call: SCOTLAND
+            # dt_extracted <- .SurvChhealth2(data_in = dt_survey, ctr_code = "SCO")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            # # function call: EW
+            # dt_extracted <- .SurvChhealth2(data_in = dt_survey, ctr_code = "EW")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            # # function call: NI
+            # dt_extracted <- .SurvChhealth2(data_in = dt_survey, ctr_code = "NI")
+            # dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+        
+        # c13.7 Ind Youth (10-15) Longstanding Health Condition (Disability) #
+            # .SurvYpltdis <- function(data_in, ctr_code) {
+            
+            # # start with deep copy
+            # data_out <- copy(data_in)
+            
+            # # General Recoding
+            # data_out[, ypltdis := as.character(ypltdis)]
+            # data_out[ypltdis %in% c("-9"), ypltdis := NA]
+            # data_out[ypltdis %in% c("1", "2"), ypltdis := "longstandingyes"]
+            # data_out[ypltdis %in% c("3"), ypltdis := "longstandingno"]
+            # data_out[age_dv >= 16 | age_dv < 10, ypltdis := "notyouth"] 
+            
+            # # reduce & return
+            # data_out <- copy(data_out[, .(hidp, pidp, new_var = ypltdis)])
+            # setkey(data_out, hidp, pidp)
+            
+            # # tidy variable names
+            # data.table::setnames(data_out, old = "new_var",
+            #                     new = paste0(ctr_code,"_ind_ypltdis"))
+            
+            # # explicit return
+            # return(data_out)
+            # }
+
+            # ----- # 
+
+
+        # c14 Ind Activity
+
+            .SurvActivity <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+
+            # general recoding
+            data_out[,  jbstat := as.character(jbstat)]
+            data_out[jbstat %in% c("-1", "-2"), jbstat := NA]
+            data_out[jbstat == "1",  jbstat := "self_employed"]
+            data_out[jbstat %in% c("2", "5", "14", "15"),  jbstat := "employed"]
+            data_out[jbstat == "3",  jbstat := "unemployed"]
+            data_out[jbstat == "4",  jbstat := "retired"]
+            data_out[jbstat == "6",  jbstat := "looking_after_home"]
+            data_out[jbstat == "7",  jbstat := "student_ft"]
+            data_out[jbstat == "8",  jbstat := "lts_disabled"]
+            data_out[jbstat %in% c("9", "10", "11", "12", "13", "97"),  jbstat := "activity_other"]
+            data_out[age_dv <= 15, jbstat := "activity_not_applicable"]
+            
+            # recode part time & full time
+            data_out[,  jbft_dv := as.character(jbft_dv)]
+            data_out[jbft_dv %in% c("-7", "-8", "-9"), jbft_dv := NA]
+            data_out[jbft_dv == "1",  jbft_dv := "ft"]
+            data_out[jbft_dv == "2",  jbft_dv := "pt"]
+        
+            
+            # EW
+            if (ctr_code == "EW"){
+                # no action required
+            }
+            
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = jbstat)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_ind_activity"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: EW
+            dt_extracted <- .SurvActivity(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+            
+            # ----- # 
+
+        # c15 Deprivation count # 
+            .SurvDeprivation <- function(data_in, ctr_code) {
+            
+            # start with deep copy
+            data_out <- copy(data_in)
+            
+            # start setting flags based on UK Census Bedroom Standard 
+            # c1 adult couple
+            data_out[, couple_flag := as.numeric(0)]
+            data_out[kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner"),
+                                    couple_flag := 0.5]
+            data_out[kinship2 %in% c("husband_wife", "partner_cohabitee", "civil_partner"),
+                                    couple_flag := 0.5]
+            data_out[kinship3 %in% c("husband_wife", "partner_cohabitee", "civil_partner"),
+                                    couple_flag := 0.5]
+            data_out[kinship4 %in% c("husband_wife", "partner_cohabitee", "civil_partner"),
+                                    couple_flag := 0.5]
+            data_out[kinship5 %in% c("husband_wife", "partner_cohabitee", "civil_partner"),
+                                    couple_flag := 0.5]
+            data_out[, housing_c1 := as.numeric(0)]
+            data_out[, housing_c1 := sum(couple_flag, na.rm = TRUE), by = c("hidp")]
+
+            # c2 any remaining adult (aged 21 years or over) 
+            data_out[, remaining_adult_flag := as.numeric(0)]
+            data_out[couple_flag == 0 & age_dv >= 21, remaining_adult_flag := 1]
+            data_out[, housing_c2 := as.numeric(0)]
+            data_out[, housing_c2 := sum(remaining_adult_flag, na.rm = TRUE), by = c("hidp")]
+            
+            # c3 to c8 children -> simplified UK Bedroom Standard for Children ("0.5 per unit")  
+            data_out[, remaining_children_flag := as.numeric(0)]
+            data_out[(age_dv < 18) & !(kinship1 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) & 
+                                    !(kinship2 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) & 
+                                    !(kinship3 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) & 
+                                    !(kinship4 %in% c("husband_wife", "partner_cohabitee", "civil_partner")) & 
+                                    !(kinship5 %in% c("husband_wife", "partner_cohabitee", "civil_partner")),
+                                    remaining_children_flag := 0.5]
+            data_out[, housing_c3 := as.numeric(0)]
+            data_out[, housing_c3 := sum(remaining_children_flag, na.rm = TRUE), by = c("hidp")]
+            
+            # initialize basic bed requirement and compare against number of bedrooms
+            data_out[, bed_requirements := as.numeric(0)]
+            data_out[, bed_requirements := as.integer(hsbeds) - 
+                                        round((housing_c1 + housing_c2 + housing_c3 + 0.01),0)]
+            data_out[, deprivation_housing_hh := 0L]
+            data_out[(heatch == 2) | (bed_requirements <= -1),
+                                    deprivation_housing_hh := 1L] 
+            
+            # employment dimension
+            data_out[, deprivation_employment_hh := 0L]
+            data_out[, deprivation_employment_flag := 0L]
+            data_out[(jbstat == 3 | jbstat == 8), deprivation_employment_flag := 1L]
+            data_out[, deprivation_employment_count := sum(deprivation_employment_flag),
+                                    by = c("hidp")]
+            data_out[deprivation_employment_count >= 1, deprivation_employment_hh := 1L]
+            
+            # health dimension -> poor health, LTS or disability/longstanding condition
+            data_out[, deprivation_health_hh := 0L]
+            data_out[, deprivation_health_flag := 0L]
+            data_out[scsf1 == 5 | jbstat == 8 | health == 1, deprivation_health_flag := 1L]
+            data_out[, deprivation_health_count := sum(deprivation_health_flag),
+                                    by = c("hidp")]
+            data_out[deprivation_health_count >= 1, deprivation_health_hh := 1L]
+            
+            # education dimension
+            data_out[, deprivation_education_hh := 0L]
+            data_out[, deprivation_education_flag := 0L]
+            data_out[(hiqual_dv == 5) | (hiqual_dv == 9), deprivation_education_flag := 1]
+            data_out[deprivation_education_flag == 1 & ((age_dv >= 16 & age_dv <= 18) & jbstat == "student_ft"),
+                                    deprivation_education_flag := 0]
+            data_out[, deprivation_education_count := sum(deprivation_education_flag),
+                                    by = c("hidp")]
+            data_out[deprivation_education_count >= pno_max, deprivation_education_hh := 1L]
+            
+            # sum up
+            data_out[, hh_deprivation := as.character(NA)]
+            data_out[, hh_deprivation := paste0("hh_deprivation_0",
+                                deprivation_housing_hh + deprivation_health_hh + 
+                                deprivation_education_hh + deprivation_employment_hh)]
+
+            # reduce & return
+            data_out <- copy(data_out[, .(hidp, pidp, new_var = hh_deprivation)])
+            setkey(data_out, hidp, pidp)
+            
+            # tidy variable names
+            data.table::setnames(data_out, old = "new_var",
+                                new = paste0(ctr_code,"_hh_deprivation"))
+            
+            # explicit return
+            return(data_out)
+            } 
+
+            # function call: SCOTLAND
+            dt_extracted <- .SurvDeprivation(data_in = dt_survey, ctr_code = "SCO")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: EW
+            dt_extracted <- .SurvDeprivation(data_in = dt_survey, ctr_code = "EW")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+            # function call: NI
+            dt_extracted <- .SurvDeprivation(data_in = dt_survey, ctr_code = "NI")
+            dt_survey <- merge(dt_survey, dt_extracted, by = c("hidp", "pidp"))
+
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [5] General Handling of Missing Values & Exclusion of Households ### 
+
+        # Criteria 1 HH head aged >= 16y 
+        dt_survey[, exclude_hhref := 0L]
+        dt_survey[hhref == 1 & age_dv <= 15, exclude_hhref := 1L]
+        dt_survey[, exclude_hhref := max(exclude_hhref), by = c("hidp")]
+        dt_survey <- copy(dt_survey[exclude_hhref == 0, ])
+
+        # # debugging
+        #     chk <- dt_survey[, .(hidp, age_dv,
+        #     urban  = is.na(EW_hh_urban_rural), heating = is.na(EW_hh_heating), type = is.na(EW_hh_type),
+        #     sexage = is.na(EW_ind_sex_age),    dis     = is.na(ind_disability),
+        #     edu    = is.na(EW_ind_education),  eth     = is.na(EW_ind_ethnicity), health = is.na(EW_ind_health))]
+        #     vars <- c("urban", "heating", "type", "sexage", "dis", "edu", "eth", "health")
+
+        #     # 1. who is missing what, by age group (shares of people)
+        #     chk[, age_grp := cut(age_dv, c(-Inf, 7, 15, 18, Inf), labels = c("0-7", "8-15", "16-18", "19+"))]
+        #     chk[, c(.(people = .N), lapply(.SD, function(x) round(mean(x), 3))), by = age_grp, .SDcols = vars][order(age_grp)]
+
+        #     # 2. share of households that would be dropped, by household size
+        #     hh <- chk[, c(.(size = .N), lapply(.SD, any)), by = hidp, .SDcols = vars]
+        #     hh[, excluded := Reduce(`|`, .SD), .SDcols = vars]
+        #     hh[, .(households = .N, share_excluded = round(mean(excluded), 3)), by = .(size = pmin(size, 5))][order(size)]
+
+        #     # 3. which variables cause it (share of households with a gap in each)
+        #     round(sort(colMeans(hh[, ..vars]), decreasing = TRUE), 3)
+
+        #     # 4. how many households are dropped by a single variable alone
+        #     hh[excluded == TRUE, .N, by = .(only = apply(.SD, 1, function(r) if (sum(r) == 1) vars[r] else "several")), .SDcols = vars][order(-N)]
+
+        #     # debugging: 
+        #         dt_survey[age_dv >= 0 & age_dv <= 15,
+        #             .(children = .N), by = .(sex, missing = is.na(EW_ind_disability), imputed = EW_ind_disability_imputed)][order(sex, missing)]
+        #     # recheck US disability vars 
+        #     for (f in c("n_child.tab", "n_indall.tab", "n_youth.tab", "n_hhresp.tab")) {
+        #         nm <- names(data.table::fread(file.path("Input/Survey", f), nrows = 0))
+        #         cat("\n", f, "\n")
+        #         print(grep("dis|health|hlth|ill|limit|impair|condit", nm, value = TRUE, ignore.case = TRUE))
+        #         }
+            
+        #     coverage <- function(file, vars) {
+        #         d <- data.table::fread(file.path("Input/Survey", file), select = c("pidp", vars))
+        #         a <- data.table::fread("Input/Survey/n_indall.tab", select = c("pidp", "n_age_dv"))
+        #         d <- merge(a[n_age_dv >= 0 & n_age_dv <= 15], d, by = "pidp", all.x = TRUE)
+        #         d[, c(.(children = .N), lapply(.SD, function(x) round(mean(!is.na(x) & x > 0), 3))),
+        #             by = n_age_dv, .SDcols = vars][order(n_age_dv)]
+        #         }
+
+        #         coverage("n_child.tab", c("n_cddis"))   # add other candidates to the vector
+
+        #         dt_survey[age_dv >= 0, age_show := fifelse(
+        #             age_dv <= 20, sprintf("%02d", age_dv),
+        #             as.character(cut(age_dv, c(20, 34, 49, 64, 79, Inf),
+        #                             labels = c("21-34", "35-49", "50-64", "65-79", "80+"))))]
+
+        #             dt_survey[age_dv >= 0,
+        #                     .(people        = .N,
+        #                         cddis_valid   = round(mean(cddis   %in% c(1, 2)), 3),
+        #                         ypltdis_valid = round(mean(ypltdis %in% c(1, 2, 3)), 3),
+        #                         health_valid  = round(mean(health  %in% c(1, 2)), 3),
+        #                         any_valid     = round(mean(!is.na(ind_disability)), 3)),
+        #                     by = age_show][order(age_show)]
+                    
+        #             dt_survey[, age_show := NULL]
+        #             dt_survey[cddis %in% c(1, 2) & ypltdis %in% c(1, 2, 3), .N, by = .(age_dv, cddis, ypltdis)]
+        #             dt_survey[age_dv >= 16, .N, by = .(health)][order(health)]
+            
+        # Criteria 2 Missing Constraints Data 
+            dt_survey[, exclude_hh := 0L]
+                dt_survey[
+                is.na(EW_hh_region) |
+                is.na(EW_hh_urban_rural) |
+                is.na(EW_hh_heating) |
+                is.na(EW_hh_type) |
+                is.na(EW_ind_sex_age) |
+                is.na(EW_ind_sex_age_disability) |
+                is.na(EW_ind_education) |
+                is.na(EW_ind_ethnicity) |
+                is.na(EW_ind_health),
+                exclude_hh := 1L]
+                dt_survey[, exclude_hh := max(exclude_hh), by = c("hidp")]
+                dt_survey <- copy(dt_survey[exclude_hh == 0, ])
+                
+                # monitor 
+                    l_definitions$diag_surv_size_hh_final <- length(unique(dt_survey$hidp))
+                    l_definitions$diag_surv_size_ind_final <- length(unique(dt_survey$pidp))
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+        # check all constraint variables
+        table(dt_survey$EW_hh_region, useNA = "always")
+        table(dt_survey$EW_hh_urban_rural, useNA = "always")
+        table(dt_survey$EW_hh_heating, useNA = "always")
+        table(dt_survey$EW_hh_type, useNA = "always")
+        # table(dt_survey$EW_hh_tenure_presence_child, useNA = "always")
+        # table(dt_survey$EW_hh_cars_hh_size, useNA = "always")
+        # table(dt_survey$EW_hh_beds_hh_size, useNA = "always")
+        # table(dt_survey$EW_hh_carer, useNA = "always")
+        table(dt_survey$EW_ind_sex_age, useNA = "always")
+        table(dt_survey$EW_ind_education, useNA = "always")
+        table(dt_survey$EW_ind_ethnicity, useNA = "always")
+        # table(dt_survey$EW_ind_partnership, useNA = "always")
+        table(dt_survey$EW_ind_health, useNA = "always")
+
+        ##
+
+        table(dt_survey$EW_ind_disability, useNA = "always")
+        table(dt_survey$EW_ind_disability_sim, useNA = "always")
+        table(dt_survey$EW_ind_sex_age_disability, useNA = "always")
+        table(dt_survey$EW_ind_sex_age_disability_sim, useNA = "always")
+
+        ##
+
+        # table(dt_survey$EW_ind_activity, useNA = "always")
+        # table(dt_survey$EW_hh_deprivation, useNA = "always")
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [6] COUNT + FORMAT Individual-Level Characteristics ###
+
+        # Function for Counting and Formatting Individual-Level Constraints  #
+        .CountFormatIndividuals <- function(data_input) {
+        
+        # start with deep copy
+        # data_output <- copy(dt_survey_SCO)
+        data_output <- copy(data_input)
+        
+        # sex age count + merge 
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_sex_age)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_sex_age, value.var = "N", fill = 0))
+        new_names <- paste0("ind_sex_age%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+
+        # education counts #
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_education)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                                hidp ~ ind_education, value.var = "N", fill = 0))
+        new_names <- paste0("ind_education%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+        
+        # ethnicity counts #
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_ethnicity)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                                hidp ~ ind_ethnicity, value.var = "N", fill = 0))
+        new_names <- paste0("ind_ethnicity%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+        
+        # partnership counts #
+        # dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_partnership)])
+        # dt_extracted <- copy(data.table::dcast(dt_extracted,
+        #                         hidp ~ ind_partnership, value.var = "N", fill = 0))
+        # new_names <- paste0("ind_partnership%", names(dt_extracted)[-1])
+        # setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        # data_output <- merge(data_output, dt_extracted, by = "hidp")
+        
+        # scsf1 counts #
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_health)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_health, value.var = "N", fill = 0))
+        new_names <- paste0("ind_health%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+
+        # disability binary counts # 
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_disability)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_disability, value.var = "N", fill = 0))
+        new_names <- paste0("ind_disability%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")   
+
+        # disability binary simulated counts # 
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_disability_sim)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_disability_sim, value.var = "N", fill = 0))
+        new_names <- paste0("ind_disability_sim%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")  
+
+        # disability sex age count + merge #
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_sex_age_disability)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_sex_age_disability, value.var = "N", fill = 0))
+        new_names <- paste0("ind_sex_age_disability%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+
+        # disability sim sex age count + merge #
+        dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_sex_age_disability_sim)])
+        dt_extracted <- copy(data.table::dcast(dt_extracted,
+                            hidp ~ ind_sex_age_disability_sim, value.var = "N", fill = 0))
+        new_names <- paste0("ind_sex_age_disability_sim%", names(dt_extracted)[-1])
+        setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        data_output <- merge(data_output, dt_extracted, by = "hidp")
+
+        # jbstat counts #
+        # dt_extracted <- copy(data_output[, .N, by = .(hidp, ind_activity)])
+        # dt_extracted <- copy(data.table::dcast(dt_extracted,
+        #                     hidp ~ ind_activity, value.var = "N", fill = 0))
+        # new_names <- paste0("ind_activity%", names(dt_extracted)[-1])
+        # setnames(dt_extracted, old = names(dt_extracted)[-1], new = new_names)
+        # data_output <- merge(data_output, dt_extracted, by = "hidp")
+        
+        # clear of not applicable columns
+        cols_to_remove <- grepl("not_applicable", names(data_output), ignore.case = TRUE)
+        data_output[, (names(data_output)[cols_to_remove]) := NULL]
+        
+        # explicit return 
+        return(data_output)
+        
+        }
+
+        # EW # 
+        dt_survey_EW <- copy(dt_survey[, c("pidp", "hidp", "buno_dv", "hhref", "source",
+                                grep("^EW", names(dt_survey), value = TRUE)), with = FALSE])
+        setnames(dt_survey_EW, old = names(dt_survey_EW),
+                new = sub("^EW_", "", names(dt_survey_EW)))
+        dt_survey_EW <- .CountFormatIndividuals(data_input = dt_survey_EW)
+        dt_survey_EW2 <- copy(dt_survey_EW[hhref == 1,
+            c("hidp", grep("%", names(dt_survey_EW), value = TRUE)), with = FALSE])
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+### [7] Combine HH and Individual Level Information - Keep One Row Per HH Format ###
+
+        .CountFormatHouseholds <- function(data_input, ctr_code) {
+        
+        # start with deep copy
+        data_output <- copy(data_input)
+        
+        if (ctr_code == "EW") {
+            data_output <- copy(data_output[hhref == 1, 
+            .(hidp, hh_region, hh_urban_rural, hh_heating, hh_type 
+                # hh_tenure_presence_child,
+                # hh_cars_hh_size, hh_beds_hh_size, hh_employment_hh_size, hh_carer, 
+                # hh_deprivation
+                )])
+        }
+        
+        # Melt to long format (excluding ID and Individual-Level Constraints)
+        data_output <- melt( data_output,
+        id.vars = "hidp",
+        measure.vars = colnames(data_output)[2:length(colnames(data_output))],
+        variable.name = "variable",
+        value.name = "value")
+
+        # indicate combined cat value 
+        data_output[, cat_val := as.character(paste0(variable,"%",value))]
+
+        # Add one-hot column and do not retain the rest
+        data_output <- data_output[, .(hidp, cat_val, one = 1)]
+
+        # Create one-hot encoded wide format
+        data_output <- data.table::dcast(data_output, hidp ~ cat_val,
+                                        value.var = "one", fill = 0)
+        
+        # explicit return 
+        return(data_output)
+        
+        }
+
+        # Function Call 
+        dt_survey_EW1  <- .CountFormatHouseholds(data_input = dt_survey_EW, ctr_code = "EW")
+
+        # merge 
+        dt_survey_EW_complete  <- merge(dt_survey_EW1, dt_survey_EW2, by = "hidp")
+
+        # save 
+        data.table::fwrite(dt_survey_EW_complete, "Output/Survey/dt_EW_survey.csv")
+
+        # ---------------------------------------------------------------------------- #
+        # ---------------------------------------------------------------------------- #
+
+        }
+
+### [8] Drop Welsh HHs
+    # Keep English HHs only
+        dt_survey_E <- dt_survey_EW_complete[which(dt_survey_EW_complete$'hh_region%england' == 1), ]
+    # Remove the region col 
+        # colnames(dt_survey_E)
+        dt_survey_E <- dt_survey_E[, -c('hh_region%england', 'hh_region%other')]
+    # Save
+        write.csv(dt_survey_E, "Output/Survey/dt_E_survey.csv")
+
+### [9] Final checks 
+        ex   <- copy(dt_survey_E)
+        dcol <- grep("^ind_sex_age_disability%", names(ex), value = TRUE)
+
+        nrow(ex) # households
+        ex[, hh_size := rowSums(.SD), .SDcols = dcol]
+        ex[, .N, by = .(size = pmin(hh_size, 5))][order(size)][, share := round(N / sum(N), 3)][]
+
+        hcol <- grep("^hh_type%", names(ex), value = TRUE)
+        round(colSums(ex[, ..hcol]) / nrow(ex), 3)
+
+        d1 <- grep("_dis1$", dcol, value = TRUE)
+        sum(ex[, ..d1]) / sum(ex[, ..dcol]) # disability prevalence
+
+
+```
+```{r format us_export}
+# Format us_export for compass 
+    library(data.table)
+    dt_survey_e <- fread("Output/Survey/dt_E_survey.csv")
+
+    # Target column order, taken from the example file (header only)
+    target_cols <- names(fread("data/England/us_hh_export_e_go_10_no_imputation.csv", nrows = 0))
+
+    # Rename one set of disability columns to the compass format, then select and reorder
+    make_export <- function(dt, from_prefix, from_suffix) {
+    out <- copy(dt)
+    old <- grep(paste0("^", from_prefix, "%"), names(out), value = TRUE)
+    new <- sub(paste0("^", from_prefix, "%"), "ind_sex_age_dis%", old)
+    new <- sub(paste0("_", from_suffix, "([01])$"), "_dis\\1", new)
+    setnames(out, old, new)
+
+    missing <- setdiff(target_cols, names(out))
+    if (length(missing)) stop("Missing columns: ", paste(missing, collapse = ", "))
+
+    out[, target_cols, with = FALSE]
+    }
+
+    dt_survey_e_real <- make_export(dt_survey_e, "ind_sex_age_disability",     "dis")
+    dt_survey_e_sim  <- make_export(dt_survey_e, "ind_sex_age_disability_sim", "dis_sim")
+
+    # Check
+    stopifnot(identical(names(dt_survey_e_real), target_cols),
+            identical(names(dt_survey_e_sim),  target_cols))
+
+    # Save (fwrite doesn't add a row-number column)
+    fwrite(dt_survey_e_real, "data/England/us_hh_export_e_go_10.csv")
+    fwrite(dt_survey_e_sim,  "data/England/us_hh_export_e_go_10_sim.csv")
+
+```
+
